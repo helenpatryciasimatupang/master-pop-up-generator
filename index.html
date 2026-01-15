@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Master Pop Up Generator</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    input { display: block; margin: 6px 0; padding: 6px; width: 280px; }
+    button { margin-top: 10px; padding: 10px 20px; }
+  </style>
+</head>
+<body>
+
+<h2>Master Pop Up Generator</h2>
+
+<input type="file" id="file" accept=".xlsx">
+
+<h3>Input Area</h3>
+<input id="area" placeholder="Nama Area">
+<input id="district" placeholder="District">
+<input id="subdistrict" placeholder="Sub District">
+<input id="postcode" placeholder="Post Code">
+<input id="fdt" placeholder="FDT Code">
+<input id="idarea" placeholder="ID Area">
+
+<button onclick="generate()">Generate Master Pop Up</button>
+
+<script>
+function generate() {
+  const file = document.getElementById('file').files[0];
+  if (!file) return alert('Upload DATA BASE.xlsx');
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const wb = XLSX.read(e.target.result, { type: 'binary' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet);
+
+    const area = getArea();
+    const output = [];
+
+    const poles = rows.filter(r => r.FolderPath && r.FolderPath.includes('/POLE/'));
+    const hooks = rows.filter(r => r.FolderPath && r.FolderPath.includes('/HOOK/'));
+
+    rows.forEach(r => {
+      if (!r.FolderPath) return;
+      if (!r.FolderPath.includes('/HOME') && !r.FolderPath.includes('/HOME-BIZ')) return;
+
+      const house = r.Name || '-';
+      let block = '-';
+      let streetNum = house;
+
+      if (/^[A-Za-z]\d+/.test(house)) {
+        block = house[0];
+        streetNum = house.slice(1);
+      }
+
+      const pole = poles.find(p => p.FAT === r.FAT);
+      const hook = hooks.find(h => h.Name === r.CLAIM_HOOK);
+
+      output.push({
+        HOMEPASS_ID: '-',
+        CLUSTER_NAME: area.area,
+        PREFIX_ADDRESS: 'JL.',
+        STREET_NAME: r.JALAN || '-',
+        HOUSE_NUMBER: house,
+        BLOCK: block,
+        STREET_NUMBER: streetNum,
+        FLOOR: '-', RT: '-', RW: '-',
+        DISTRICT: area.district,
+        SUB_DISTRICT: area.subdistrict,
+        POST_CODE: area.postcode,
+        FDT_CODE: area.fdt,
+        FAT_CODE: r.FAT || '-',
+        BUILDING_LATITUDE: r.X || '-',
+        BUILDING_LONGITUDE: r.Y || '-',
+        ADDRESS_POLE_FAT: '-',
+        OV_UG: 'O',
+        HOUSE_COMMENT_: 'NEED SURVEY',
+        BUILDING_NAME: '-', TOWER: '-', APTN: '-', FIBER_NODE__HFC_: '-',
+        ID_AREA: area.idarea,
+        Clamp_Hook_ID: r.CLAIM_HOOK || '-',
+        DEPLOYMENT_TYPE: 'FAT EXT',
+        NEED_SURVEY: 'YES',
+        Pole_ID_New: pole ? pole.Name : '-',
+        Coordinate_Lat_NEW: pole ? pole.X : '-',
+        Coordinate_Long_NEW: pole ? pole.Y : '-',
+        Pole_Provider_New: 'LN (Existing)',
+        Pole_Type: 'Pole 7/250',
+        LINE: '',
+        FAT_ID_NETWORK_ID: pole ? pole.FAT : '-',
+        Clamp_Hook_LATITUDE: hook ? hook.X : '-',
+        Clamp_Hook_LONGITUDE: hook ? hook.Y : '-'
+      });
+    });
+
+    const ws = XLSX.utils.json_to_sheet(output);
+    const wbOut = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wbOut, ws, 'MASTER_POP_UP');
+    XLSX.writeFile(wbOut, 'MASTER_POP_UP.xlsx');
+  };
+
+  reader.readAsBinaryString(file);
+}
+
+function getArea() {
+  return {
+    area: document.getElementById('area').value,
+    district: document.getElementById('district').value,
+    subdistrict: document.getElementById('subdistrict').value,
+    postcode: document.getElementById('postcode').value,
+    fdt: document.getElementById('fdt').value,
+    idarea: document.getElementById('idarea').value
+  };
+}
+</script>
+
+</body>
+</html>
