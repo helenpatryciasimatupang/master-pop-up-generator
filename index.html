@@ -8,7 +8,6 @@
     body { font-family: Arial, sans-serif; padding: 20px; }
     input { display: block; margin: 6px 0; padding: 6px; width: 280px; }
     button { margin-top: 10px; padding: 10px 20px; }
-    .note { font-size: 12px; opacity: .8; margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -26,51 +25,21 @@
 <input id="idarea" placeholder="ID Area">
 
 <button onclick="generate()">Generate Master Pop Up</button>
-<div class="note">Clamp Hook Lat/Lon akan diambil dari baris DB yang FolderPath-nya /HOOK/{ID} lalu pakai kolom X & Y.</div>
 
 <script>
-// ===== UTIL =====
+// ================= UTIL =================
 function normalize(v) {
   return String(v ?? '').trim().toUpperCase();
 }
 
-function toNum(v) {
-  if (v === null || v === undefined || v === '') return NaN;
-  const n = Number(String(v).trim());
-  return Number.isFinite(n) ? n : NaN;
-}
-
-// Latitude = abs <= 90
+// Latitude = nilai abs <= 90
 function getLatLon(x, y) {
-  const X = toNum(x), Y = toNum(y);
+  const X = Number(x), Y = Number(y);
   if (!Number.isFinite(X) || !Number.isFinite(Y)) return { lat: '-', lon: '-' };
 
   if (Math.abs(X) <= 90 && Math.abs(Y) > 90) return { lat: X, lon: Y };
   if (Math.abs(Y) <= 90 && Math.abs(X) > 90) return { lat: Y, lon: X };
   return { lat: X, lon: Y };
-}
-
-// Ambil ID HOOK dari FolderPath setelah "/HOOK/"
-function hookIdFromFolderPath(folderPath) {
-  const fp = String(folderPath || '');
-  const up = fp.toUpperCase();
-
-  const idx = up.indexOf('/HOOK/');
-  if (idx === -1) return '';
-
-  // ambil substring setelah "/HOOK/"
-  let rest = fp.slice(idx + 6);
-
-  // ambil segmen pertama sebelum "/" (kalau ada subfolder)
-  rest = rest.split('/')[0];
-
-  // buang ekstensi file (contoh: 13R.KML)
-  rest = rest.replace(/\.[A-Z0-9]+$/i, '');
-
-  // buang spasi & karakter aneh, ambil token alnum paling depan
-  // contoh "13R (HOOK)" -> "13R"
-  const m = rest.toUpperCase().match(/[A-Z0-9]+/);
-  return m ? m[0] : '';
 }
 
 function getArea() {
@@ -84,7 +53,7 @@ function getArea() {
   };
 }
 
-// ===== MAIN =====
+// ================= MAIN =================
 function generate() {
   const file = document.getElementById('file').files[0];
   if (!file) return alert('Upload DATA BASE.xlsx');
@@ -98,30 +67,28 @@ function generate() {
     const area = getArea();
     const output = [];
 
-    // ===== BUILD HOOK MAP FROM FOLDERPATH =====
-    // hookMap["13R"] = {lat, lon} dari kolom X/Y baris HOOK 13R
+    // ===== POLE =====
+    const poles = rows.filter(r =>
+      String(r.FolderPath || '').toUpperCase().includes('/POLE')
+    );
+
+    // ===== HOOK MAP (KEY = Name, contoh: 13R) =====
     const hookMap = {};
     rows.forEach(r => {
-      if (!r.FolderPath) return;
-      if (String(r.FolderPath).toUpperCase().indexOf('/HOOK/') === -1) return;
+      const fp = String(r.FolderPath || '').toUpperCase();
+      if (!fp.includes('/HOOK')) return;
 
-      const hid = hookIdFromFolderPath(r.FolderPath);
-      if (!hid) return;
-
-      const coord = getLatLon(r.X, r.Y);
-      // simpan pertama yang valid (kalau ada duplikat)
-      if (!hookMap[hid] && coord.lat !== '-' && coord.lon !== '-') {
-        hookMap[hid] = coord;
+      const key = normalize(r.Name); // 🔥 ID HOOK ada di kolom Name
+      const coord = getLatLon(r.X, r.Y); // 🔥 ambil X & Y baris HOOK (kuning)
+      if (key && coord.lat !== '-' && coord.lon !== '-' && !hookMap[key]) {
+        hookMap[key] = coord;
       }
     });
 
-    // ===== POLE =====
-    const poles = rows.filter(r => r.FolderPath && String(r.FolderPath).includes('/POLE/'));
-
     // ===== HOME / HOME-BIZ =====
     rows.forEach(r => {
-      if (!r.FolderPath) return;
-      if (!String(r.FolderPath).includes('/HOME') && !String(r.FolderPath).includes('/HOME-BIZ')) return;
+      const fp = String(r.FolderPath || '');
+      if (!fp.includes('/HOME') && !fp.includes('/HOME-BIZ')) return;
 
       const house = r.Name || '-';
 
@@ -137,9 +104,9 @@ function generate() {
       const pole = poles.find(p => p.FAT === r.FAT);
       const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '-', lon: '-' };
 
-      // ===== CLAMP HOOK: ambil dari hookMap berdasarkan Clamp_Hook_ID (CLAIM_HOOK) =====
-      const clampId = normalize(r.CLAIM_HOOK);     // contoh: 13R
-      const hookCoord = hookMap[clampId] || { lat: '-', lon: '-' };
+      // 🔥 FINAL: Clamp Hook ambil dari HOOK.Name == CLAIM_HOOK
+      const hookKey = normalize(r.CLAIM_HOOK); // misal: 13R
+      const hookCoord = hookMap[hookKey] || { lat: '-', lon: '-' };
 
       output.push({
         HOMEPASS_ID: '-',
@@ -181,9 +148,6 @@ function generate() {
     const wbOut = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wbOut, ws, 'MASTER_POP_UP');
     XLSX.writeFile(wbOut, 'MASTER_POP_UP.xlsx');
-
-    // Debug kecil (kalau masih kosong, ini bantu)
-    // alert(`HOOK terdeteksi: ${Object.keys(hookMap).length} | Row output: ${output.length}`);
   };
 
   reader.readAsBinaryString(file);
