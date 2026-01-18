@@ -32,6 +32,7 @@ function normalize(v) {
   return String(v ?? '').trim().toUpperCase();
 }
 
+// Latitude = abs <= 90
 function getLatLon(x, y) {
   const X = Number(x), Y = Number(y);
   if (!Number.isFinite(X) || !Number.isFinite(Y)) return { lat: '-', lon: '-' };
@@ -70,7 +71,7 @@ function generate() {
       String(r.FolderPath || '').toUpperCase().includes('/POLE')
     );
 
-    // ===== HOOK MAP =====
+    // ===== HOOK MAP (Name = ID HOOK) =====
     const hookMap = {};
     rows.forEach(r => {
       if (String(r.FolderPath || '').toUpperCase().includes('/HOOK')) {
@@ -80,12 +81,12 @@ function generate() {
       }
     });
 
+    // ===== HOME / HOME-BIZ =====
     rows.forEach(r => {
       const fp = String(r.FolderPath || '');
       if (!fp.includes('/HOME') && !fp.includes('/HOME-BIZ')) return;
 
       const house = r.Name || '-';
-
       let block = '-';
       if (/^[A-Za-z]\d+/.test(house)) block = house[0];
 
@@ -132,6 +133,63 @@ function generate() {
         'FAT ID/NETWORK ID': pole ? pole.FAT : '-',
         'Clamp_Hook_LATITUDE': hookCoord.lat,
         'Clamp_Hook_LONGITUDE': hookCoord.lon
+      });
+    });
+
+    // ===== BARIS POLE (SATU POLE = SATU BARIS) =====
+    const poleAdded = new Set();
+    poles.forEach(p => {
+      const poleKey = normalize(p.Name);
+      if (!poleKey || poleAdded.has(poleKey)) return;
+      poleAdded.add(poleKey);
+
+      const poleCoord = getLatLon(p.X, p.Y);
+
+      // FAT hanya jika koordinat sama dengan POLE
+      const fatSameCoord = rows.find(r => {
+        if (!r.FAT) return false;
+        const c = getLatLon(r.X, r.Y);
+        return c.lat === poleCoord.lat && c.lon === poleCoord.lon;
+      });
+
+      output.push({
+        'HOMEPASS_ID': '-',
+        'CLUSTER_NAME': area.area,
+        'PREFIX_ADDRESS': '-',
+        'STREET_NAME': '-',
+        'HOUSE_NUMBER': '-',
+        'BLOCK': '-',
+        'FLOOR': '-',
+        'RT': '-',
+        'RW': '-',
+        'DISTRICT': area.district,
+        'SUB_DISTRICT': area.subdistrict,
+        'FDT_CODE': area.fdt,
+        'FAT_CODE': '-',
+        'BUILDING_LATITUDE': '-',
+        'BUILDING_LONGITUDE': '-',
+        'Category BizPass': '',
+        'POST CODE': area.postcode,
+        'ADDRESS POLE / FAT': '-',
+        'OV_UG': 'O',
+        'HOUSE_COMMENT_': '',
+        'BUILDING_NAME': '-',
+        'TOWER': '-',
+        'APTN': '-',
+        'FIBER_NODE__HFC_': '-',
+        'ID_Area': area.idarea,
+        'Clamp_Hook_ID': '-',
+        'DEPLOYMENT_TYPE': 'FAT EXT',
+        'NEED_SURVEY': 'YES',
+        'Pole ID (New)': p.Name,
+        'Coordinate (Lat) NEW': poleCoord.lat,
+        'Coordinate (Long) NEW': poleCoord.lon,
+        'Pole Provider (New)': 'LN (Existing)',
+        'Pole Type': 'Pole 7/250',
+        'LINE': '',
+        'FAT ID/NETWORK ID': fatSameCoord ? fatSameCoord.FAT : '-',
+        'Clamp_Hook_LATITUDE': '-',
+        'Clamp_Hook_LONGITUDE': '-'
       });
     });
 
