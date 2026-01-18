@@ -60,19 +60,18 @@ function generate() {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
     const area = getArea();
 
-    const poleOutput = [];
-    const homeOutput = [];
+    const output = [];
 
-    // ===== POLE DATA =====
+    // ===== POLE =====
     const poles = rows.filter(r =>
       String(r.FolderPath || '').toUpperCase().includes('/POLE')
     );
 
     const poleMap = {};
     poles.forEach(p => {
-      const key = normalize(p.Name);
-      if (!poleMap[key]) {
-        poleMap[key] = {
+      const k = normalize(p.Name);
+      if (!poleMap[k]) {
+        poleMap[k] = {
           name: p.Name,
           coord: getLatLon(p.X, p.Y)
         };
@@ -89,7 +88,7 @@ function generate() {
           return c.lat === p.coord.lat && c.lon === p.coord.lon;
         });
 
-        poleOutput.push({
+        output.push({
           'HOMEPASS_ID':'-',
           'CLUSTER_NAME':area.area,
           'PREFIX_ADDRESS':'-',
@@ -151,7 +150,7 @@ function generate() {
       const homeCoord = getLatLon(r.X, r.Y);
       const hookCoord = hookMap[normalize(r.CLAIM_HOOK)] || { lat:'-', lon:'-' };
 
-      homeOutput.push({
+      output.push({
         'HOMEPASS_ID':'-',
         'CLUSTER_NAME':area.area,
         'PREFIX_ADDRESS':'JL.',
@@ -191,9 +190,6 @@ function generate() {
         'Clamp_Hook_LONGITUDE':hookCoord.lon
       });
     });
-
-    // ===== GABUNG (POLE DULU, HOME SETELAHNYA) =====
-    const output = [...poleOutput, ...homeOutput];
 
     const ws = XLSX.utils.json_to_sheet(output);
     const outWB = XLSX.utils.book_new();
