@@ -42,14 +42,14 @@ function getLatLon(x, y) {
   return { lat: X, lon: Y };
 }
 
-function getArea() {
+function getAreaData() {
   return {
-    area: area.value,
-    district: district.value,
-    subdistrict: subdistrict.value,
-    postcode: postcode.value,
-    fdt: fdt.value,
-    idarea: idarea.value
+    area: document.getElementById('area').value,
+    district: document.getElementById('district').value,
+    subdistrict: document.getElementById('subdistrict').value,
+    postcode: document.getElementById('postcode').value,
+    fdt: document.getElementById('fdt').value,
+    idarea: document.getElementById('idarea').value
   };
 }
 
@@ -70,7 +70,8 @@ function generate() {
   const tplFile = document.getElementById('templateFile').files[0];
   if (!dbFile || !tplFile) return alert('Upload DATABASE dan TEMPLATE');
 
-  const area = getArea();
+  const areaData = getAreaData();
+
   const dbReader = new FileReader();
   const tplReader = new FileReader();
 
@@ -78,12 +79,10 @@ function generate() {
     const dbWB = XLSX.read(e1.target.result, { type: 'binary' });
     const rows = XLSX.utils.sheet_to_json(dbWB.Sheets[dbWB.SheetNames[0]]);
 
-    // ===== POLE =====
     const poles = rows.filter(r =>
       String(r.FolderPath || '').toUpperCase().includes('/POLE')
     );
 
-    // ===== HOOK MAP =====
     const hookMap = {};
     rows.forEach(r => {
       if (String(r.FolderPath || '').toUpperCase().includes('/HOOK')) {
@@ -93,7 +92,6 @@ function generate() {
       }
     });
 
-    // ===== BUILD OUTPUT (LOGIC KAMU, TIDAK DIUBAH) =====
     const output = [];
     rows.forEach(r => {
       if (!String(r.FolderPath || '').includes('/HOME') &&
@@ -106,17 +104,17 @@ function generate() {
 
       output.push({
         HOMEPASS_ID: '-',
-        CLUSTER_NAME: area.area,
+        CLUSTER_NAME: areaData.area,
         PREFIX_ADDRESS: 'JL.',
         STREET_NAME: r.JALAN || '-',
         HOUSE_NUMBER: r.Name || '-',
         BLOCK: '-',
         STREET_NUMBER: r.Name || '-',
         FLOOR: '-', RT: '-', RW: '-',
-        DISTRICT: area.district,
-        SUB_DISTRICT: area.subdistrict,
-        POST_CODE: area.postcode,
-        FDT_CODE: area.fdt,
+        DISTRICT: areaData.district,
+        SUB_DISTRICT: areaData.subdistrict,
+        POST_CODE: areaData.postcode,
+        FDT_CODE: areaData.fdt,
         FAT_CODE: r.FAT || '-',
         BUILDING_LATITUDE: homeCoord.lat,
         BUILDING_LONGITUDE: homeCoord.lon,
@@ -124,7 +122,7 @@ function generate() {
         OV_UG: 'O',
         HOUSE_COMMENT_: 'NEED SURVEY',
         BUILDING_NAME: '-', TOWER: '-', APTN: '-', FIBER_NODE__HFC_: '-',
-        ID_AREA: area.idarea,
+        ID_AREA: areaData.idarea,
         Clamp_Hook_ID: r.CLAIM_HOOK || '-',
         DEPLOYMENT_TYPE: 'FAT EXT',
         NEED_SURVEY: 'YES',
@@ -140,14 +138,13 @@ function generate() {
       });
     });
 
-    // ===== APPLY TO TEMPLATE =====
     tplReader.onload = e2 => {
       const tplWB = XLSX.read(e2.target.result, { type: 'binary' });
       const sheet = tplWB.Sheets['MASTER_POP_UP'];
       if (!sheet) return alert('Sheet MASTER_POP_UP tidak ditemukan');
 
       const headerMap = getHeaderMap(sheet);
-      let rowIndex = 1; // ROW 2
+      let rowIndex = 1;
 
       output.forEach(row => {
         Object.keys(row).forEach(key => {
