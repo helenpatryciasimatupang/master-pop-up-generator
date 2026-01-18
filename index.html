@@ -27,16 +27,15 @@
 <button onclick="generate()">Generate Master Pop Up</button>
 
 <script>
-// ===== UTIL =====
+// ================= UTIL =================
 function normalize(v) {
   return String(v || '').trim().toUpperCase();
 }
 
-// Latitude = nilai abs <= 90, Longitude = sisanya
 function getLatLon(x, y) {
   if (Math.abs(x) <= 90 && Math.abs(y) > 90) return { lat: x, lon: y };
   if (Math.abs(y) <= 90 && Math.abs(x) > 90) return { lat: y, lon: x };
-  return { lat: x, lon: y }; // fallback ikut database
+  return { lat: x, lon: y };
 }
 
 function getArea() {
@@ -50,7 +49,7 @@ function getArea() {
   };
 }
 
-// ===== MAIN =====
+// ================= MAIN =================
 function generate() {
   const file = document.getElementById('file').files[0];
   if (!file) return alert('Upload DATA BASE.xlsx');
@@ -68,11 +67,11 @@ function generate() {
     const poles = rows.filter(r => r.FolderPath && r.FolderPath.includes('/POLE/'));
     const hooks = rows.filter(r => r.FolderPath && r.FolderPath.includes('/HOOK/'));
 
-    // === HOOK MAP (1 CLAIM_HOOK = 1 KOORDINAT) ===
+    // === HOOK MAP (PASTI DARI CLAIM_HOOK) ===
     const hookMap = {};
     hooks.forEach(h => {
-      const key = normalize(h.Name);
-      if (!hookMap[key]) {
+      const key = normalize(h.CLAIM_HOOK);
+      if (key && !hookMap[key]) {
         hookMap[key] = getLatLon(h.X, h.Y);
       }
     });
@@ -95,7 +94,7 @@ function generate() {
       const pole = poles.find(p => p.FAT === r.FAT);
       const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '-', lon: '-' };
 
-      // 🔥 FINAL FIX: HOOK KOORDINAT KONSISTEN
+      // 🔥 FIX UTAMA: AMBIL HOOK DARI MAP
       const hookKey = normalize(r.CLAIM_HOOK);
       const hookCoord = hookMap[hookKey] || { lat: '-', lon: '-' };
 
