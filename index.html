@@ -32,6 +32,7 @@ function normalize(v) {
   return String(v || '').trim().toUpperCase();
 }
 
+// Latitude = nilai abs <= 90
 function getLatLon(x, y) {
   if (Math.abs(x) <= 90 && Math.abs(y) > 90) return { lat: x, lon: y };
   if (Math.abs(y) <= 90 && Math.abs(x) > 90) return { lat: y, lon: x };
@@ -67,10 +68,10 @@ function generate() {
     const poles = rows.filter(r => r.FolderPath && r.FolderPath.includes('/POLE/'));
     const hooks = rows.filter(r => r.FolderPath && r.FolderPath.includes('/HOOK/'));
 
-    // === HOOK MAP (PASTI DARI CLAIM_HOOK) ===
+    // === HOOK MAP (KEY = Name HOOK) ===
     const hookMap = {};
     hooks.forEach(h => {
-      const key = normalize(h.CLAIM_HOOK);
+      const key = normalize(h.Name);
       if (key && !hookMap[key]) {
         hookMap[key] = getLatLon(h.X, h.Y);
       }
@@ -94,7 +95,7 @@ function generate() {
       const pole = poles.find(p => p.FAT === r.FAT);
       const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '-', lon: '-' };
 
-      // 🔥 FIX UTAMA: AMBIL HOOK DARI MAP
+      // 🔥 FINAL FIX: CLAMP HOOK DARI MAP
       const hookKey = normalize(r.CLAIM_HOOK);
       const hookCoord = hookMap[hookKey] || { lat: '-', lon: '-' };
 
