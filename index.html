@@ -2,12 +2,12 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Master Pop Up Generator</title>
+  <title>Master Pop Up Generator (Template Based)</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
-    input { display: block; margin: 6px 0; padding: 6px; width: 280px; }
-    button { margin-top: 10px; padding: 10px 20px; }
+    input { display: block; margin: 6px 0; padding: 6px; width: 320px; }
+    button { margin-top: 12px; padding: 10px 22px; }
   </style>
 </head>
 <body>
@@ -27,104 +27,108 @@
 <button onclick="generate()">Generate Master Pop Up</button>
 
 <script>
-function generate() {
-  const file = document.getElementById('file').files[0];
-  if (!file) return alert('Upload DATA BASE.xlsx');
+async function generate() {
+  const dbFile = document.getElementById('file').files[0];
+  if (!dbFile) {
+    alert('Upload DATA BASE.xlsx');
+    return;
+  }
 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const wb = XLSX.read(e.target.result, { type: 'binary' });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet);
+  // ===============================
+  // 1. READ DATABASE
+  // ===============================
+  const dbReader = new FileReader();
+  dbReader.onload = async (e) => {
+    const wbDB = XLSX.read(e.target.result, { type: 'binary' });
+    const dbSheet = wbDB.Sheets[wbDB.SheetNames[0]];
+    const dbRows = XLSX.utils.sheet_to_json(dbSheet);
 
-    const area = getArea();
-    const output = [];
+    // ===============================
+    // 2. LOAD TEMPLATE MASTER POP UP
+    // ===============================
+    const tplResp = await fetch('New_Master_Pop_UP.xlsx');
+    const tplBuf = await tplResp.arrayBuffer();
+    const wbTpl = XLSX.read(tplBuf, { type: 'array' });
+    const ws = wbTpl.Sheets['MASTER_POP_UP'] || wbTpl.Sheets[wbTpl.SheetNames[0]];
 
-    const poles = rows.filter(r => r.FolderPath?.includes('/POLE/'));
-    const hooks = rows.filter(r => r.FolderPath?.includes('/HOOK/'));
+    // ===============================
+    // 3. MAP HEADER → COLUMN LETTER
+    // ===============================
+    const headerMap = {};
+    Object.keys(ws)
+      .filter(k => k.endsWith('1'))
+      .forEach(k => {
+        const header = ws[k].v;
+        const col = k.replace('1', '');
+        headerMap[header] = col;
+      });
 
-    rows.forEach(r => {
+    // ===============================
+    // 4. PREPARE LOOKUP
+    // ===============================
+    const poles = dbRows.filter(r => r.FolderPath?.includes('/POLE/'));
+    const hooks = dbRows.filter(r => r.FolderPath?.includes('/HOOK/'));
+
+    // ===============================
+    // 5. FILL TEMPLATE ROW BY ROW
+    // ===============================
+    let rowIndex = 2;
+
+    dbRows.forEach(r => {
       if (!r.FolderPath) return;
       if (!r.FolderPath.includes('/HOME') && !r.FolderPath.includes('/HOME-BIZ')) return;
-
-      const house = r.Name || '-';
-
-      let block = '-';
-      let streetNum = house;
-      if (/^[A-Za-z]\d+/.test(house)) {
-        block = house[0];
-        streetNum = house.slice(1);
-      }
 
       const pole = poles.find(p => p.FAT === r.FAT);
       const hook = hooks.find(h => h.Name === r.CLAIM_HOOK);
 
-      // 🔒 DIKUNCI: LAT = X, LON = Y
-      const lat = r.X ?? r['X'] ?? r['X '] ?? r[' X'] ?? '-';
-      const lon = r.Y ?? r['Y'] ?? r['Y '] ?? r[' Y'] ?? '-';
+      // 🔒 KUNCI: LAT = X, LON = Y
+      ws[headerMap['HOMEPASS_ID'] + rowIndex] = { v: '-' };
+      ws[headerMap['CLUSTER_NAME'] + rowIndex] = { v: document.getElementById('area').value };
+      ws[headerMap['PREFIX_ADDRESS'] + rowIndex] = { v: 'JL.' };
+      ws[headerMap['STREET_NAME'] + rowIndex] = { v: r.JALAN || '-' };
+      ws[headerMap['HOUSE_NUMBER'] + rowIndex] = { v: r.Name || '-' };
 
-      output.push({
-        HOMEPASS_ID: '-',
-        CLUSTER_NAME: area.area,
-        PREFIX_ADDRESS: 'JL.',
-        STREET_NAME: r.JALAN || '-',
-        HOUSE_NUMBER: house,
-        BLOCK: block,
-        STREET_NUMBER: streetNum,
-        FLOOR: '-', RT: '-', RW: '-',
+      ws[headerMap['DISTRICT'] + rowIndex] = { v: document.getElementById('district').value };
+      ws[headerMap['SUB_DISTRICT'] + rowIndex] = { v: document.getElementById('subdistrict').value };
+      ws[headerMap['POST_CODE'] + rowIndex] = { v: document.getElementById('postcode').value };
+      ws[headerMap['FDT_CODE'] + rowIndex] = { v: document.getElementById('fdt').value };
 
-        DISTRICT: area.district,
-        SUB_DISTRICT: area.subdistrict,
-        POST_CODE: area.postcode,
-        FDT_CODE: area.fdt,
+      ws[headerMap['FAT_CODE'] + rowIndex] = { v: r.FAT || '-' };
 
-        FAT_CODE: r.FAT || '-',
-        BUILDING_LATITUDE: lat,
-        BUILDING_LONGITUDE: lon,
+      // 🔥 INI POIN UTAMA
+      ws[headerMap['BUILDING_LATITUDE'] + rowIndex] = { v: r.X };
+      ws[headerMap['BUILDING_LONGITUDE'] + rowIndex] = { v: r.Y };
 
-        ADDRESS_POLE_FAT: '-',
-        OV_UG: 'O',
-        HOUSE_COMMENT_: 'NEED SURVEY',
-        BUILDING_NAME: '-', TOWER: '-', APTN: '-', FIBER_NODE__HFC_: '-',
+      ws[headerMap['OV_UG'] + rowIndex] = { v: 'O' };
+      ws[headerMap['HOUSE_COMMENT_'] + rowIndex] = { v: 'NEED SURVEY' };
+      ws[headerMap['ID_AREA'] + rowIndex] = { v: document.getElementById('idarea').value };
 
-        ID_AREA: area.idarea,
-        Clamp_Hook_ID: r.CLAIM_HOOK || '-',
-        DEPLOYMENT_TYPE: 'FAT EXT',
-        NEED_SURVEY: 'YES',
+      ws[headerMap['Clamp_Hook_ID'] + rowIndex] = { v: r.CLAIM_HOOK || '-' };
+      ws[headerMap['DEPLOYMENT_TYPE'] + rowIndex] = { v: 'FAT EXT' };
+      ws[headerMap['NEED_SURVEY'] + rowIndex] = { v: 'YES' };
 
-        Pole_ID_New: pole?.Name || '-',
-        Coordinate_Lat_NEW: pole?.X ?? '-',
-        Coordinate_Long_NEW: pole?.Y ?? '-',
+      if (pole) {
+        ws[headerMap['Pole ID (New)'] + rowIndex] = { v: pole.Name };
+        ws[headerMap['Coordinate (Lat) NEW'] + rowIndex] = { v: pole.X };
+        ws[headerMap['Coordinate (Long) NEW'] + rowIndex] = { v: pole.Y };
+        ws[headerMap['FAT ID/NETWORK ID'] + rowIndex] = { v: pole.FAT };
+      }
 
-        Pole_Provider_New: 'LN (Existing)',
-        Pole_Type: 'Pole 7/250',
-        LINE: '',
+      if (hook) {
+        ws[headerMap['Clamp_Hook_LATITUDE'] + rowIndex] = { v: hook.X };
+        ws[headerMap['Clamp_Hook_LONGITUDE'] + rowIndex] = { v: hook.Y };
+      }
 
-        FAT_ID_NETWORK_ID: pole?.FAT || '-',
-
-        Clamp_Hook_LATITUDE: hook?.X ?? '-',
-        Clamp_Hook_LONGITUDE: hook?.Y ?? '-'
-      });
+      rowIndex++;
     });
 
-    const ws = XLSX.utils.json_to_sheet(output);
-    const wbOut = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wbOut, ws, 'MASTER_POP_UP');
-    XLSX.writeFile(wbOut, 'MASTER_POP_UP.xlsx');
+    // ===============================
+    // 6. EXPORT
+    // ===============================
+    XLSX.writeFile(wbTpl, 'MASTER_POP_UP.xlsx');
   };
 
-  reader.readAsBinaryString(file);
-}
-
-function getArea() {
-  return {
-    area: document.getElementById('area').value,
-    district: document.getElementById('district').value,
-    subdistrict: document.getElementById('subdistrict').value,
-    postcode: document.getElementById('postcode').value,
-    fdt: document.getElementById('fdt').value,
-    idarea: document.getElementById('idarea').value
-  };
+  dbReader.readAsBinaryString(dbFile);
 }
 </script>
 
