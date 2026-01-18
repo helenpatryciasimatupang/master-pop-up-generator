@@ -2,23 +2,19 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Master Pop Up Generator (Template Based)</title>
+  <title>Master Pop Up Generator</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
-    input { display: block; margin: 6px 0; padding: 6px; width: 340px; }
-    button { margin-top: 12px; padding: 10px 22px; }
+    input { display: block; margin: 6px 0; padding: 6px; width: 280px; }
+    button { margin-top: 10px; padding: 10px 20px; }
   </style>
 </head>
 <body>
 
 <h2>Master Pop Up Generator</h2>
 
-<label><b>DATA BASE.xlsx</b></label>
-<input type="file" id="dbFile" accept=".xlsx">
-
-<label><b>Template Master Pop Up.xlsx</b></label>
-<input type="file" id="tplFile" accept=".xlsx">
+<input type="file" id="file" accept=".xlsx">
 
 <h3>Input Area</h3>
 <input id="area" placeholder="Nama Area">
@@ -32,92 +28,91 @@
 
 <script>
 function generate() {
-  const dbFile = document.getElementById('dbFile').files[0];
-  const tplFile = document.getElementById('tplFile').files[0];
+  const file = document.getElementById('file').files[0];
+  if (!file) return alert('Upload DATA BASE.xlsx');
 
-  if (!dbFile || !tplFile) {
-    alert('Upload DATA BASE dan Template Master Pop Up');
-    return;
-  }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const wb = XLSX.read(e.target.result, { type: 'binary' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet);
 
-  const dbReader = new FileReader();
-  const tplReader = new FileReader();
+    const area = getArea();
+    const output = [];
 
-  dbReader.onload = (dbEvt) => {
-    const wbDB = XLSX.read(dbEvt.target.result, { type: 'binary' });
-    const dbSheet = wbDB.Sheets[wbDB.SheetNames[0]];
-    const dbRows = XLSX.utils.sheet_to_json(dbSheet);
+    const poles = rows.filter(r => r.FolderPath && r.FolderPath.includes('/POLE/'));
+    const hooks = rows.filter(r => r.FolderPath && r.FolderPath.includes('/HOOK/'));
 
-    tplReader.onload = (tplEvt) => {
-      const wbTpl = XLSX.read(tplEvt.target.result, { type: 'binary' });
-      const ws = wbTpl.Sheets['MASTER_POP_UP'] || wbTpl.Sheets[wbTpl.SheetNames[0]];
+    rows.forEach(r => {
+      if (!r.FolderPath) return;
+      if (!r.FolderPath.includes('/HOME') && !r.FolderPath.includes('/HOME-BIZ')) return;
 
-      // MAP HEADER → COLUMN
-      const headerMap = {};
-      Object.keys(ws)
-        .filter(k => k.endsWith('1'))
-        .forEach(k => {
-          headerMap[ws[k].v] = k.replace('1', '');
-        });
+      const house = r.Name || '-';
+      let block = '-';
+      let streetNum = house;
 
-      const poles = dbRows.filter(r => r.FolderPath?.includes('/POLE/'));
-      const hooks = dbRows.filter(r => r.FolderPath?.includes('/HOOK/'));
+      if (/^[A-Za-z]\d+/.test(house)) {
+        block = house[0];
+        streetNum = house.slice(1);
+      }
 
-      let row = 2;
+      const pole = poles.find(p => p.FAT === r.FAT);
+      const hook = hooks.find(h => h.Name === r.CLAIM_HOOK);
 
-      dbRows.forEach(r => {
-        if (!r.FolderPath) return;
-        if (!r.FolderPath.includes('/HOME') && !r.FolderPath.includes('/HOME-BIZ')) return;
-
-        const pole = poles.find(p => p.FAT === r.FAT);
-        const hook = hooks.find(h => h.Name === r.CLAIM_HOOK);
-
-        // 🔒 KUNCI: LAT = X, LON = Y
-        ws[headerMap['HOMEPASS_ID'] + row] = { v: '-' };
-        ws[headerMap['CLUSTER_NAME'] + row] = { v: area.value };
-        ws[headerMap['PREFIX_ADDRESS'] + row] = { v: 'JL.' };
-        ws[headerMap['STREET_NAME'] + row] = { v: r.JALAN };
-        ws[headerMap['HOUSE_NUMBER'] + row] = { v: r.Name };
-
-        ws[headerMap['DISTRICT'] + row] = { v: district.value };
-        ws[headerMap['SUB_DISTRICT'] + row] = { v: subdistrict.value };
-        ws[headerMap['POST_CODE'] + row] = { v: postcode.value };
-        ws[headerMap['FDT_CODE'] + row] = { v: fdt.value };
-
-        ws[headerMap['FAT_CODE'] + row] = { v: r.FAT };
-        ws[headerMap['BUILDING_LATITUDE'] + row] = { v: r.X };
-        ws[headerMap['BUILDING_LONGITUDE'] + row] = { v: r.Y };
-
-        ws[headerMap['OV_UG'] + row] = { v: 'O' };
-        ws[headerMap['HOUSE_COMMENT_'] + row] = { v: 'NEED SURVEY' };
-        ws[headerMap['ID_AREA'] + row] = { v: idarea.value };
-
-        ws[headerMap['Clamp_Hook_ID'] + row] = { v: r.CLAIM_HOOK };
-        ws[headerMap['DEPLOYMENT_TYPE'] + row] = { v: 'FAT EXT' };
-        ws[headerMap['NEED_SURVEY'] + row] = { v: 'YES' };
-
-        if (pole) {
-          ws[headerMap['Pole ID (New)'] + row] = { v: pole.Name };
-          ws[headerMap['Coordinate (Lat) NEW'] + row] = { v: pole.X };
-          ws[headerMap['Coordinate (Long) NEW'] + row] = { v: pole.Y };
-          ws[headerMap['FAT ID/NETWORK ID'] + row] = { v: pole.FAT };
-        }
-
-        if (hook) {
-          ws[headerMap['Clamp_Hook_LATITUDE'] + row] = { v: hook.X };
-          ws[headerMap['Clamp_Hook_LONGITUDE'] + row] = { v: hook.Y };
-        }
-
-        row++;
+      output.push({
+        HOMEPASS_ID: '-',
+        CLUSTER_NAME: area.area,
+        PREFIX_ADDRESS: 'JL.',
+        STREET_NAME: r.JALAN || '-',
+        HOUSE_NUMBER: house,
+        BLOCK: block,
+        STREET_NUMBER: streetNum,
+        FLOOR: '-', RT: '-', RW: '-',
+        DISTRICT: area.district,
+        SUB_DISTRICT: area.subdistrict,
+        POST_CODE: area.postcode,
+        FDT_CODE: area.fdt,
+        FAT_CODE: r.FAT || '-',
+        BUILDING_LATITUDE: r.X || '-',
+        BUILDING_LONGITUDE: r.Y || '-',
+        ADDRESS_POLE_FAT: '-',
+        OV_UG: 'O',
+        HOUSE_COMMENT_: 'NEED SURVEY',
+        BUILDING_NAME: '-', TOWER: '-', APTN: '-', FIBER_NODE__HFC_: '-',
+        ID_AREA: area.idarea,
+        Clamp_Hook_ID: r.CLAIM_HOOK || '-',
+        DEPLOYMENT_TYPE: 'FAT EXT',
+        NEED_SURVEY: 'YES',
+        Pole_ID_New: pole ? pole.Name : '-',
+        Coordinate_Lat_NEW: pole ? pole.X : '-',
+        Coordinate_Long_NEW: pole ? pole.Y : '-',
+        Pole_Provider_New: 'LN (Existing)',
+        Pole_Type: 'Pole 7/250',
+        LINE: '',
+        FAT_ID_NETWORK_ID: pole ? pole.FAT : '-',
+        Clamp_Hook_LATITUDE: hook ? hook.X : '-',
+        Clamp_Hook_LONGITUDE: hook ? hook.Y : '-'
       });
+    });
 
-      XLSX.writeFile(wbTpl, 'MASTER_POP_UP.xlsx');
-    };
-
-    tplReader.readAsBinaryString(tplFile);
+    const ws = XLSX.utils.json_to_sheet(output);
+    const wbOut = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wbOut, ws, 'MASTER_POP_UP');
+    XLSX.writeFile(wbOut, 'MASTER_POP_UP.xlsx');
   };
 
-  dbReader.readAsBinaryString(dbFile);
+  reader.readAsBinaryString(file);
+}
+
+function getArea() {
+  return {
+    area: document.getElementById('area').value,
+    district: document.getElementById('district').value,
+    subdistrict: document.getElementById('subdistrict').value,
+    postcode: document.getElementById('postcode').value,
+    fdt: document.getElementById('fdt').value,
+    idarea: document.getElementById('idarea').value
+  };
 }
 </script>
 
