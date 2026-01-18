@@ -28,14 +28,13 @@
 
 <script>
 function getLatLon(x, y) {
-  if (Math.abs(x) <= 90 && Math.abs(y) > 90) {
-    return { lat: x, lon: y };
-  }
-  if (Math.abs(y) <= 90 && Math.abs(x) > 90) {
-    return { lat: y, lon: x };
-  }
-  // fallback (ikut database kamu)
-  return { lat: x, lon: y };
+  if (Math.abs(x) <= 90 && Math.abs(y) > 90) return { lat: x, lon: y };
+  if (Math.abs(y) <= 90 && Math.abs(x) > 90) return { lat: y, lon: x };
+  return { lat: x, lon: y }; // fallback ikut database
+}
+
+function normalize(v) {
+  return String(v || '').trim().toUpperCase();
 }
 
 function generate() {
@@ -51,6 +50,7 @@ function generate() {
     const area = getArea();
     const output = [];
 
+    // lookup POLE & HOOK
     const poles = rows.filter(r => r.FolderPath && r.FolderPath.includes('/POLE/'));
     const hooks = rows.filter(r => r.FolderPath && r.FolderPath.includes('/HOOK/'));
 
@@ -68,11 +68,17 @@ function generate() {
       }
 
       const homeCoord = getLatLon(r.X, r.Y);
-      const pole = poles.find(p => p.FAT === r.FAT);
-      const hook = hooks.find(h => h.Name === r.CLAIM_HOOK);
 
+      const pole = poles.find(p => p.FAT === r.FAT);
       const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '-', lon: '-' };
-      const hookCoord = hook ? getLatLon(hook.X, hook.Y) : { lat: '-', lon: '-' };
+
+      // 🔥 FIX UTAMA CLAMP HOOK (fleksibel + fallback)
+      const hook = hooks.find(h =>
+        normalize(h.Name).includes(normalize(r.CLAIM_HOOK))
+      );
+      const hookCoord = hook
+        ? getLatLon(hook.X, hook.Y)
+        : getLatLon(r.X, r.Y); // fallback ke HOME
 
       output.push({
         HOMEPASS_ID: '-',
