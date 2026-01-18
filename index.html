@@ -2,19 +2,21 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Master Pop Up Generator</title>
+  <title>Master Pop Up Generator (Template)</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
-    input { display: block; margin: 6px 0; padding: 6px; width: 280px; }
-    button { margin-top: 10px; padding: 10px 20px; }
+    input { display: block; margin: 6px 0; padding: 6px; width: 320px; }
+    button { margin-top: 12px; padding: 10px 20px; }
   </style>
 </head>
 <body>
 
-<h2>Master Pop Up Generator</h2>
+<h2>Master Pop Up Generator (Template Based)</h2>
 
-<input type="file" id="file" accept=".xlsx">
+<h3>Upload File</h3>
+<input type="file" id="dbFile" accept=".xlsx">
+<input type="file" id="templateFile" accept=".xlsx">
 
 <h3>Input Area</h3>
 <input id="area" placeholder="Nama Area">
@@ -32,11 +34,9 @@ function normalize(v) {
   return String(v ?? '').trim().toUpperCase();
 }
 
-// Latitude = nilai abs <= 90
 function getLatLon(x, y) {
   const X = Number(x), Y = Number(y);
-  if (!Number.isFinite(X) || !Number.isFinite(Y)) return { lat: '-', lon: '-' };
-
+  if (!Number.isFinite(X) || !Number.isFinite(Y)) return { lat: '', lon: '' };
   if (Math.abs(X) <= 90 && Math.abs(Y) > 90) return { lat: X, lon: Y };
   if (Math.abs(Y) <= 90 && Math.abs(X) > 90) return { lat: Y, lon: X };
   return { lat: X, lon: Y };
@@ -55,102 +55,97 @@ function getArea() {
 
 // ================= MAIN =================
 function generate() {
-  const file = document.getElementById('file').files[0];
-  if (!file) return alert('Upload DATA BASE.xlsx');
+  const dbFile = document.getElementById('dbFile').files[0];
+  const tplFile = document.getElementById('templateFile').files[0];
+  if (!dbFile || !tplFile) return alert('Upload DATA BASE & TEMPLATE');
 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const wb = XLSX.read(e.target.result, { type: 'binary' });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet);
+  const area = getArea();
 
-    const area = getArea();
-    const output = [];
+  const dbReader = new FileReader();
+  const tplReader = new FileReader();
 
-    // ===== POLE =====
+  dbReader.onload = (e1) => {
+    const dbWB = XLSX.read(e1.target.result, { type: 'binary' });
+    const dbSheet = dbWB.Sheets[dbWB.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(dbSheet);
+
+    // === HOOK MAP (Name = ID HOOK) ===
+    const hookMap = {};
+    rows.forEach(r => {
+      if (String(r.FolderPath || '').toUpperCase().includes('/HOOK')) {
+        const key = normalize(r.Name);
+        const coord = getLatLon(r.X, r.Y);
+        if (key && !hookMap[key]) hookMap[key] = coord;
+      }
+    });
+
+    // === POLE ===
     const poles = rows.filter(r =>
       String(r.FolderPath || '').toUpperCase().includes('/POLE')
     );
 
-    // ===== HOOK MAP (KEY = Name, contoh: 13R) =====
-    const hookMap = {};
-    rows.forEach(r => {
-      const fp = String(r.FolderPath || '').toUpperCase();
-      if (!fp.includes('/HOOK')) return;
+    tplReader.onload = (e2) => {
+      const tplWB = XLSX.read(e2.target.result, { type: 'binary' });
+      const sheetName = 'MASTER_POP_UP';
+      const sheet = tplWB.Sheets[sheetName];
 
-      const key = normalize(r.Name); // 🔥 ID HOOK ada di kolom Name
-      const coord = getLatLon(r.X, r.Y); // 🔥 ambil X & Y baris HOOK (kuning)
-      if (key && coord.lat !== '-' && coord.lon !== '-' && !hookMap[key]) {
-        hookMap[key] = coord;
-      }
-    });
+      let rowIndex = 1; // ROW 2 (0-based)
 
-    // ===== HOME / HOME-BIZ =====
-    rows.forEach(r => {
-      const fp = String(r.FolderPath || '');
-      if (!fp.includes('/HOME') && !fp.includes('/HOME-BIZ')) return;
+      rows.forEach(r => {
+        const fp = String(r.FolderPath || '');
+        if (!fp.includes('/HOME') && !fp.includes('/HOME-BIZ')) return;
 
-      const house = r.Name || '-';
+        const homeCoord = getLatLon(r.X, r.Y);
+        const hookCoord = hookMap[normalize(r.CLAIM_HOOK)] || { lat: '', lon: '' };
+        const pole = poles.find(p => p.FAT === r.FAT);
+        const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '', lon: '' };
 
-      let block = '-';
-      let streetNum = house;
-      if (/^[A-Za-z]\d+/.test(house)) {
-        block = house[0];
-        streetNum = house.slice(1);
-      }
+        const rowData = [
+          '-',                    // HOMEPASS_ID
+          area.area,              // CLUSTER_NAME
+          'JL.',                  // PREFIX_ADDRESS
+          r.JALAN || '',          // STREET_NAME
+          r.Name || '',           // HOUSE_NUMBER
+          '',                     // BLOCK
+          r.Name || '',           // STREET_NUMBER
+          '-', '-', '-',           // FLOOR, RT, RW
+          area.district,
+          area.subdistrict,
+          area.postcode,
+          area.fdt,
+          r.FAT || '',
+          homeCoord.lat,
+          homeCoord.lon,
+          '-',                    // ADDRESS_POLE_FAT
+          'O',
+          'NEED SURVEY',
+          '-', '-', '-', '-',      // BUILDING_NAME, TOWER, APTN, FIBER
+          area.idarea,
+          r.CLAIM_HOOK || '',
+          'FAT EXT',
+          'YES',
+          pole ? pole.Name : '',
+          poleCoord.lat,
+          poleCoord.lon,
+          'LN (Existing)',
+          'Pole 7/250',
+          '',
+          pole ? pole.FAT : '',
+          hookCoord.lat,
+          hookCoord.lon
+        ];
 
-      const homeCoord = getLatLon(r.X, r.Y);
-
-      const pole = poles.find(p => p.FAT === r.FAT);
-      const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '-', lon: '-' };
-
-      // 🔥 FINAL: Clamp Hook ambil dari HOOK.Name == CLAIM_HOOK
-      const hookKey = normalize(r.CLAIM_HOOK); // misal: 13R
-      const hookCoord = hookMap[hookKey] || { lat: '-', lon: '-' };
-
-      output.push({
-        HOMEPASS_ID: '-',
-        CLUSTER_NAME: area.area,
-        PREFIX_ADDRESS: 'JL.',
-        STREET_NAME: r.JALAN || '-',
-        HOUSE_NUMBER: house,
-        BLOCK: block,
-        STREET_NUMBER: streetNum,
-        FLOOR: '-', RT: '-', RW: '-',
-        DISTRICT: area.district,
-        SUB_DISTRICT: area.subdistrict,
-        POST_CODE: area.postcode,
-        FDT_CODE: area.fdt,
-        FAT_CODE: r.FAT || '-',
-        BUILDING_LATITUDE: homeCoord.lat,
-        BUILDING_LONGITUDE: homeCoord.lon,
-        ADDRESS_POLE_FAT: '-',
-        OV_UG: 'O',
-        HOUSE_COMMENT_: 'NEED SURVEY',
-        BUILDING_NAME: '-', TOWER: '-', APTN: '-', FIBER_NODE__HFC_: '-',
-        ID_AREA: area.idarea,
-        Clamp_Hook_ID: r.CLAIM_HOOK || '-',
-        DEPLOYMENT_TYPE: 'FAT EXT',
-        NEED_SURVEY: 'YES',
-        Pole_ID_New: pole ? pole.Name : '-',
-        Coordinate_Lat_NEW: poleCoord.lat,
-        Coordinate_Long_NEW: poleCoord.lon,
-        Pole_Provider_New: 'LN (Existing)',
-        Pole_Type: 'Pole 7/250',
-        LINE: '',
-        FAT_ID_NETWORK_ID: pole ? pole.FAT : '-',
-        Clamp_Hook_LATITUDE: hookCoord.lat,
-        Clamp_Hook_LONGITUDE: hookCoord.lon
+        XLSX.utils.sheet_add_aoa(sheet, [rowData], { origin: `A${rowIndex + 1}` });
+        rowIndex++;
       });
-    });
 
-    const ws = XLSX.utils.json_to_sheet(output);
-    const wbOut = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wbOut, ws, 'MASTER_POP_UP');
-    XLSX.writeFile(wbOut, 'MASTER_POP_UP.xlsx');
+      XLSX.writeFile(tplWB, 'MASTER_POP_UP_RESULT.xlsx');
+    };
+
+    tplReader.readAsBinaryString(tplFile);
   };
 
-  reader.readAsBinaryString(file);
+  dbReader.readAsBinaryString(dbFile);
 }
 </script>
 
