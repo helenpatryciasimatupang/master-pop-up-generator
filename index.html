@@ -1,178 +1,95 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8">
-  <title>Master Pop Up Generator (FINAL)</title>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-  <style>
-    body { font-family: Arial, sans-serif; padding: 20px; }
-    input { display:block; margin:6px 0; padding:6px; width:300px; }
-    button { margin-top:10px; padding:10px 20px; }
-  </style>
+<meta charset="UTF-8">
+<title>Master Pop Up Generator FINAL</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
-<h2>Master Pop Up Generator (FINAL)</h2>
-
-<input type="file" id="file" accept=".xlsx">
-
-<h3>Input Area</h3>
-<input id="area" placeholder="Nama Area">
-<input id="district" placeholder="District">
-<input id="subdistrict" placeholder="Sub District">
-<input id="postcode" placeholder="Post Code">
-<input id="fdt" placeholder="FDT Code">
-<input id="idarea" placeholder="ID Area">
-
-<button onclick="generate()">Generate Master Pop Up</button>
+<input type="file" id="file" accept=".xlsx"><br><br>
+<button onclick="generate()">Generate</button>
 
 <script>
-// ========= UTIL =========
 const normalize = v => String(v ?? '').trim().toUpperCase();
 
 function getLatLon(x,y){
   const X=Number(x), Y=Number(y);
-  if(!Number.isFinite(X)||!Number.isFinite(Y)) return {lat:'-',lon:'-'};
-  if(Math.abs(X)<=90&&Math.abs(Y)>90) return {lat:X,lon:Y};
-  if(Math.abs(Y)<=90&&Math.abs(X)>90) return {lat:Y,lon:X};
+  if(!isFinite(X)||!isFinite(Y)) return {lat:'-',lon:'-'};
+  if(Math.abs(X)<=90 && Math.abs(Y)>90) return {lat:X,lon:Y};
+  if(Math.abs(Y)<=90 && Math.abs(X)>90) return {lat:Y,lon:X};
   return {lat:X,lon:Y};
 }
 
-function getArea(){
-  return {
-    area:area.value,
-    district:district.value,
-    subdistrict:subdistrict.value,
-    postcode:postcode.value,
-    fdt:fdt.value,
-    idarea:idarea.value
-  };
+function set(ws,r,c,v){
+  ws[XLSX.utils.encode_cell({r,c})]={t:'s',v:String(v)};
 }
 
-// ========= MAIN =========
 function generate(){
   const file=document.getElementById('file').files[0];
-  if(!file) return alert('Upload DATA BASE.xlsx');
+  if(!file) return alert('Upload DATABASE');
 
   const reader=new FileReader();
   reader.onload=e=>{
     const wb=XLSX.read(e.target.result,{type:'binary'});
     const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-    const area=getArea();
-    const output=[];
 
-    // ===== POLE =====
-    const poles=rows.filter(r=>String(r.FolderPath||'').toUpperCase().includes('/POLE'));
+    const ws={};
+    ws['!ref']='A1:AZ1000';
 
-    // ===== HOOK MAP =====
+    let rowHome=1; // BARIS 2
+    let rowPole=1; // BARIS 2
+
+    // ===== BUILD HOOK MAP =====
     const hookMap={};
     rows.forEach(r=>{
-      if(String(r.FolderPath||'').toUpperCase().includes('/HOOK')){
-        const k=normalize(r.Name);
-        if(!hookMap[k]) hookMap[k]=getLatLon(r.X,r.Y);
+      if(String(r.FolderPath||'').includes('/HOOK')){
+        hookMap[normalize(r.Name)] = getLatLon(r.X,r.Y);
       }
     });
 
-    // ===== HOME / HOME-BIZ =====
+    // ===== HOME =====
     rows.forEach(r=>{
-      const fp=String(r.FolderPath||'');
-      if(!fp.includes('/HOME')&&!fp.includes('/HOME-BIZ')) return;
+      if(!String(r.FolderPath||'').includes('/HOME')) return;
 
-      const house=r.Name||'-';
-      let block='-';
-      if(/^[A-Za-z]\d+/.test(house)) block=house[0];
+      const hook=hookMap[normalize(r.CLAIM_HOOK)]||{lat:'-',lon:'-'};
+      const home=getLatLon(r.X,r.Y);
 
-      const homeCoord=getLatLon(r.X,r.Y);
-      const hookCoord=hookMap[normalize(r.CLAIM_HOOK)]||{lat:'-',lon:'-'};
+      set(ws,rowHome,0,'-');                  // A HOMEPASS_ID
+      set(ws,rowHome,3,r.JALAN||'-');         // D STREET
+      set(ws,rowHome,4,r.Name||'-');          // E HOUSE
+      set(ws,rowHome,13,home.lat);            // N LAT
+      set(ws,rowHome,14,home.lon);            // O LON
+      set(ws,rowHome,26,hook.lat);            // AA Clamp LAT
+      set(ws,rowHome,27,hook.lon);            // AB Clamp LON
 
-      output.push({
-        'HOMEPASS_ID':'-',
-        'CLUSTER_NAME':area.area,
-        'PREFIX_ADDRESS':'JL.',
-        'STREET_NAME':r.JALAN||'-',
-        'HOUSE_NUMBER':house,
-        'BLOCK':block,
-        'FLOOR':'-','RT':'-','RW':'-',
-        'DISTRICT':area.district,
-        'SUB_DISTRICT':area.subdistrict,
-        'FDT_CODE':area.fdt,
-        'FAT_CODE':r.FAT||'-',
-        'BUILDING_LATITUDE':homeCoord.lat,
-        'BUILDING_LONGITUDE':homeCoord.lon,
-        'Category BizPass':'',
-        'POST CODE':area.postcode,
-        'ADDRESS POLE / FAT':'-',
-        'OV_UG':'O',
-        'HOUSE_COMMENT_':'NEED SURVEY',
-        'BUILDING_NAME':'-','TOWER':'-','APTN':'-','FIBER_NODE__HFC_':'-',
-        'ID_Area':area.idarea,
-        'Clamp_Hook_ID':r.CLAIM_HOOK||'-',
-        'DEPLOYMENT_TYPE':'FAT EXT',
-        'NEED_SURVEY':'YES',
-        'Pole ID (New)':'-',
-        'Coordinate (Lat) NEW':'-',
-        'Coordinate (Long) NEW':'-',
-        'Pole Provider (New)':'LN (Existing)',
-        'Pole Type':'Pole 7/250',
-        'LINE':'',
-        'FAT ID/NETWORK ID':'-',
-        'Clamp_Hook_LATITUDE':hookCoord.lat,
-        'Clamp_Hook_LONGITUDE':hookCoord.lon
-      });
+      rowHome++;
     });
 
-    // ===== POLE FINAL (UNIK & URUT) =====
+    // ===== POLE (MULAI BARIS 2 JUGA) =====
     const poleMap={};
-    poles.forEach(p=>{
-      const n=normalize(p.Name);
-      if(!poleMap[n]) poleMap[n]={name:p.Name,coord:getLatLon(p.X,p.Y)};
+    rows.forEach(r=>{
+      if(String(r.FolderPath||'').includes('/POLE')){
+        const k=normalize(r.Name);
+        if(!poleMap[k]){
+          poleMap[k]={name:r.Name,coord:getLatLon(r.X,r.Y),fat:r.FAT||'-'};
+        }
+      }
     });
 
     Object.values(poleMap)
       .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))
       .forEach(p=>{
-        const fatSame=rows.find(r=>{
-          const c=getLatLon(r.X,r.Y);
-          return c.lat===p.coord.lat&&c.lon===p.coord.lon&&r.FAT;
-        });
+        set(ws,rowPole,28,p.name);       // AC Pole ID
+        set(ws,rowPole,29,p.coord.lat); // AD Lat
+        set(ws,rowPole,30,p.coord.lon); // AE Lon
+        set(ws,rowPole,31,'LN (Existing)');
+        set(ws,rowPole,32,'Pole 7/250');
+        set(ws,rowPole,34,p.fat||'-');  // AI FAT
 
-        output.push({
-          'HOMEPASS_ID':'-',
-          'CLUSTER_NAME':area.area,
-          'PREFIX_ADDRESS':'-',
-          'STREET_NAME':'-',
-          'HOUSE_NUMBER':'-',
-          'BLOCK':'-',
-          'FLOOR':'-','RT':'-','RW':'-',
-          'DISTRICT':area.district,
-          'SUB_DISTRICT':area.subdistrict,
-          'FDT_CODE':area.fdt,
-          'FAT_CODE':'-',
-          'BUILDING_LATITUDE':'-',
-          'BUILDING_LONGITUDE':'-',
-          'Category BizPass':'',
-          'POST CODE':area.postcode,
-          'ADDRESS POLE / FAT':'-',
-          'OV_UG':'O',
-          'HOUSE_COMMENT_':'',
-          'BUILDING_NAME':'-','TOWER':'-','APTN':'-','FIBER_NODE__HFC_':'-',
-          'ID_Area':area.idarea,
-          'Clamp_Hook_ID':'-',
-          'DEPLOYMENT_TYPE':'FAT EXT',
-          'NEED_SURVEY':'YES',
-          'Pole ID (New)':p.name,
-          'Coordinate (Lat) NEW':p.coord.lat,
-          'Coordinate (Long) NEW':p.coord.lon,
-          'Pole Provider (New)':'LN (Existing)',
-          'Pole Type':'Pole 7/250',
-          'LINE':'',
-          'FAT ID/NETWORK ID':fatSame?fatSame.FAT:'-',
-          'Clamp_Hook_LATITUDE':'-',
-          'Clamp_Hook_LONGITUDE':'-'
-        });
+        rowPole++;
       });
 
-    const ws=XLSX.utils.json_to_sheet(output);
     const outWB=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(outWB,ws,'MASTER_POP_UP');
     XLSX.writeFile(outWB,'MASTER_POP_UP.xlsx');
@@ -180,6 +97,5 @@ function generate(){
   reader.readAsBinaryString(file);
 }
 </script>
-
 </body>
 </html>
