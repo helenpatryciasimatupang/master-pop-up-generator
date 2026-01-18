@@ -27,6 +27,17 @@
 <button onclick="generate()">Generate Master Pop Up</button>
 
 <script>
+function getLatLon(x, y) {
+  if (Math.abs(x) <= 90 && Math.abs(y) > 90) {
+    return { lat: x, lon: y };
+  }
+  if (Math.abs(y) <= 90 && Math.abs(x) > 90) {
+    return { lat: y, lon: x };
+  }
+  // fallback (ikut database kamu)
+  return { lat: x, lon: y };
+}
+
 function generate() {
   const file = document.getElementById('file').files[0];
   if (!file) return alert('Upload DATA BASE.xlsx');
@@ -48,16 +59,20 @@ function generate() {
       if (!r.FolderPath.includes('/HOME') && !r.FolderPath.includes('/HOME-BIZ')) return;
 
       const house = r.Name || '-';
+
       let block = '-';
       let streetNum = house;
-
       if (/^[A-Za-z]\d+/.test(house)) {
         block = house[0];
         streetNum = house.slice(1);
       }
 
+      const homeCoord = getLatLon(r.X, r.Y);
       const pole = poles.find(p => p.FAT === r.FAT);
       const hook = hooks.find(h => h.Name === r.CLAIM_HOOK);
+
+      const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '-', lon: '-' };
+      const hookCoord = hook ? getLatLon(hook.X, hook.Y) : { lat: '-', lon: '-' };
 
       output.push({
         HOMEPASS_ID: '-',
@@ -73,8 +88,8 @@ function generate() {
         POST_CODE: area.postcode,
         FDT_CODE: area.fdt,
         FAT_CODE: r.FAT || '-',
-        BUILDING_LATITUDE: r.X || '-',
-        BUILDING_LONGITUDE: r.Y || '-',
+        BUILDING_LATITUDE: homeCoord.lat,
+        BUILDING_LONGITUDE: homeCoord.lon,
         ADDRESS_POLE_FAT: '-',
         OV_UG: 'O',
         HOUSE_COMMENT_: 'NEED SURVEY',
@@ -84,14 +99,14 @@ function generate() {
         DEPLOYMENT_TYPE: 'FAT EXT',
         NEED_SURVEY: 'YES',
         Pole_ID_New: pole ? pole.Name : '-',
-        Coordinate_Lat_NEW: pole ? pole.X : '-',
-        Coordinate_Long_NEW: pole ? pole.Y : '-',
+        Coordinate_Lat_NEW: poleCoord.lat,
+        Coordinate_Long_NEW: poleCoord.lon,
         Pole_Provider_New: 'LN (Existing)',
         Pole_Type: 'Pole 7/250',
         LINE: '',
         FAT_ID_NETWORK_ID: pole ? pole.FAT : '-',
-        Clamp_Hook_LATITUDE: hook ? hook.X : '-',
-        Clamp_Hook_LONGITUDE: hook ? hook.Y : '-'
+        Clamp_Hook_LATITUDE: hookCoord.lat,
+        Clamp_Hook_LONGITUDE: hookCoord.lon
       });
     });
 
