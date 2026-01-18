@@ -26,7 +26,7 @@
 <input id="fdt" placeholder="FDT Code">
 <input id="idarea" placeholder="ID Area">
 
-<button onclick="generate()">Generate Master Pop Up</button>
+<button type="button" onclick="generate()">Generate Master Pop Up</button>
 
 <script>
 // ================= UTIL =================
@@ -70,7 +70,10 @@ function getHeaderMap(sheet) {
 function generate() {
   const dbFile = document.getElementById('dbFile').files[0];
   const tplFile = document.getElementById('templateFile').files[0];
-  if (!dbFile || !tplFile) return alert('Upload DATA BASE & TEMPLATE');
+  if (!dbFile || !tplFile) {
+    alert('Upload DATA BASE & TEMPLATE');
+    return;
+  }
 
   const area = getArea();
 
@@ -82,13 +85,14 @@ function generate() {
     const dbSheet = dbWB.Sheets[dbWB.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(dbSheet);
 
-    // ===== HOOK MAP (Name = ID HOOK) =====
+    // ===== HOOK MAP =====
     const hookMap = {};
     rows.forEach(r => {
       if (String(r.FolderPath || '').toUpperCase().includes('/HOOK')) {
         const key = normalize(r.Name);
-        const coord = getLatLon(r.X, r.Y);
-        if (key && !hookMap[key]) hookMap[key] = coord;
+        if (key && !hookMap[key]) {
+          hookMap[key] = getLatLon(r.X, r.Y);
+        }
       }
     });
 
@@ -101,8 +105,13 @@ function generate() {
       const tplWB = XLSX.read(e2.target.result, { type: 'binary' });
       const sheetName = 'MASTER_POP_UP';
       const sheet = tplWB.Sheets[sheetName];
-      const headerMap = getHeaderMap(sheet);
 
+      if (!sheet) {
+        alert('Sheet "MASTER_POP_UP" tidak ditemukan di template. Nama harus PERSIS.');
+        return;
+      }
+
+      const headerMap = getHeaderMap(sheet);
       let rowIndex = 1; // ROW 2
 
       function setCell(header, value) {
@@ -121,7 +130,6 @@ function generate() {
         const pole = poles.find(p => p.FAT === r.FAT);
         const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '', lon: '' };
 
-        // ===== ISI BERDASARKAN HEADER TEMPLATE =====
         setCell('HOMEPASS_ID', '-');
         setCell('CLUSTER_NAME', area.area);
         setCell('PREFIX_ADDRESS', 'JL.');
@@ -140,45 +148,4 @@ function generate() {
         setCell('BUILDING_LATITUDE', homeCoord.lat);
         setCell('BUILDING_LONGITUDE', homeCoord.lon);
 
-        setCell('ADDRESS_POLE_FAT', '-');
-        setCell('OV_UG', 'O');
-        setCell('HOUSE_COMMENT_', 'NEED SURVEY');
-
-        setCell('BUILDING_NAME', '-');
-        setCell('TOWER', '-');
-        setCell('APTN', '-');
-        setCell('FIBER_NODE__HFC_', '-');
-
-        setCell('ID_AREA', area.idarea);
-
-        setCell('Clamp_Hook_ID', r.CLAIM_HOOK || '');
-        setCell('DEPLOYMENT_TYPE', 'FAT EXT');
-        setCell('NEED_SURVEY', 'YES');
-
-        setCell('Pole ID (New)', pole ? pole.Name : '');
-        setCell('Coordinate (Lat) NEW', poleCoord.lat);
-        setCell('Coordinate (Long) NEW', poleCoord.lon);
-
-        setCell('Pole Provider (New)', 'LN (Existing)');
-        setCell('Pole Type', 'Pole 7/250');
-        setCell('LINE', '');
-        setCell('FAT ID/NETWORK ID', pole ? pole.FAT : '');
-
-        setCell('Clamp_Hook_LATITUDE', hookCoord.lat);
-        setCell('Clamp_Hook_LONGITUDE', hookCoord.lon);
-
-        rowIndex++;
-      });
-
-      XLSX.writeFile(tplWB, 'MASTER_POP_UP_RESULT.xlsx');
-    };
-
-    tplReader.readAsBinaryString(tplFile);
-  };
-
-  dbReader.readAsBinaryString(dbFile);
-}
-</script>
-
-</body>
-</html>
+        setCell('ADDRESS_POLE_F
