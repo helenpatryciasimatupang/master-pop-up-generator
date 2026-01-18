@@ -29,10 +29,10 @@
 <script>
 // ================= UTIL =================
 function normalize(v) {
-  return String(v || '').trim().toUpperCase();
+  return String(v || '').toUpperCase().trim();
 }
 
-// Latitude = nilai abs <= 90
+// Latitude = abs <= 90
 function getLatLon(x, y) {
   if (Math.abs(x) <= 90 && Math.abs(y) > 90) return { lat: x, lon: y };
   if (Math.abs(y) <= 90 && Math.abs(x) > 90) return { lat: y, lon: x };
@@ -64,19 +64,25 @@ function generate() {
     const area = getArea();
     const output = [];
 
-    // === FILTER ENTITY ===
-    const poles = rows.filter(r => r.FolderPath && r.FolderPath.includes('/POLE/'));
-    const hooks = rows.filter(r => r.FolderPath && r.FolderPath.includes('/HOOK/'));
-
-    // === HOOK MAP (KEY = Name HOOK) ===
+    // ================= CLAMP HOOK MAP (DARI FOLDERPATH) =================
+    // contoh FolderPath: /HOOK/11R
     const hookMap = {};
-    hooks.forEach(h => {
-      const key = normalize(h.Name);
-      if (key && !hookMap[key]) {
-        hookMap[key] = getLatLon(h.X, h.Y);
+    rows.forEach(r => {
+      if (!r.FolderPath) return;
+      if (!r.FolderPath.includes('/HOOK/')) return;
+
+      const parts = r.FolderPath.split('/');
+      const hookId = normalize(parts[parts.length - 1]); // ambil 11R
+
+      if (hookId && !hookMap[hookId]) {
+        hookMap[hookId] = getLatLon(r.X, r.Y);
       }
     });
 
+    // ================= POLE =================
+    const poles = rows.filter(r => r.FolderPath && r.FolderPath.includes('/POLE/'));
+
+    // ================= HOME =================
     rows.forEach(r => {
       if (!r.FolderPath) return;
       if (!r.FolderPath.includes('/HOME') && !r.FolderPath.includes('/HOME-BIZ')) return;
@@ -95,7 +101,7 @@ function generate() {
       const pole = poles.find(p => p.FAT === r.FAT);
       const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '-', lon: '-' };
 
-      // 🔥 FINAL FIX: CLAMP HOOK DARI MAP
+      // 🔥 FINAL FIX: CLAMP HOOK DARI FOLDERPATH
       const hookKey = normalize(r.CLAIM_HOOK);
       const hookCoord = hookMap[hookKey] || { lat: '-', lon: '-' };
 
