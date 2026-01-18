@@ -1,101 +1,188 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="UTF-8">
-<title>Master Pop Up Generator FINAL</title>
-<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <meta charset="UTF-8">
+  <title>Master Pop Up Generator (FINAL)</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    input { display:block; margin:6px 0; padding:6px; width:320px; }
+    button { margin-top:10px; padding:10px 20px; }
+  </style>
 </head>
 <body>
 
-<input type="file" id="file" accept=".xlsx"><br><br>
-<button onclick="generate()">Generate</button>
+<h2>Master Pop Up Generator (FINAL)</h2>
+
+<input type="file" id="file" accept=".xlsx">
+
+<h3>Input Area</h3>
+<input id="area" placeholder="Nama Area">
+<input id="district" placeholder="District">
+<input id="subdistrict" placeholder="Sub District">
+<input id="postcode" placeholder="Post Code">
+<input id="fdt" placeholder="FDT Code">
+<input id="idarea" placeholder="ID Area">
+
+<button type="button" onclick="generate()">Generate Master Pop Up</button>
 
 <script>
+// ================= UTIL =================
 const normalize = v => String(v ?? '').trim().toUpperCase();
 
-function getLatLon(x,y){
-  const X=Number(x), Y=Number(y);
-  if(!isFinite(X)||!isFinite(Y)) return {lat:'-',lon:'-'};
-  if(Math.abs(X)<=90 && Math.abs(Y)>90) return {lat:X,lon:Y};
-  if(Math.abs(Y)<=90 && Math.abs(X)>90) return {lat:Y,lon:X};
-  return {lat:X,lon:Y};
+function getLatLon(x, y){
+  const X = Number(x), Y = Number(y);
+  if (!Number.isFinite(X) || !Number.isFinite(Y)) return { lat:'-', lon:'-' };
+  if (Math.abs(X) <= 90 && Math.abs(Y) > 90) return { lat:X, lon:Y };
+  if (Math.abs(Y) <= 90 && Math.abs(X) > 90) return { lat:Y, lon:X };
+  return { lat:X, lon:Y };
 }
 
-function set(ws,r,c,v){
-  ws[XLSX.utils.encode_cell({r,c})]={t:'s',v:String(v)};
+function setCell(ws, r, c, v){
+  ws[XLSX.utils.encode_cell({ r, c })] = { t:'s', v: String(v ?? '-') };
 }
 
+// ================= HEADER (ROW 1) =================
+// Kolom A=0 ... AI=34
+const HEADERS = [
+  'HOMEPASS_ID','CLUSTER_NAME','PREFIX_ADDRESS','STREET_NAME','HOUSE_NUMBER','BLOCK',
+  'FLOOR','RT','RW','DISTRICT','SUB_DISTRICT','FDT_CODE','FAT_CODE',
+  'BUILDING_LATITUDE','BUILDING_LONGITUDE','Category BizPass','POST CODE',
+  'ADDRESS POLE / FAT','OV_UG','HOUSE_COMMENT_','BUILDING_NAME','TOWER','APTN',
+  'FIBER_NODE__HFC_','ID_Area','Clamp_Hook_ID','DEPLOYMENT_TYPE','NEED_SURVEY',
+  'Pole ID (New)','Coordinate (Lat) NEW','Coordinate (Long) NEW',
+  'Pole Provider (New)','Pole Type','LINE','FAT ID/NETWORK ID',
+  'Clamp_Hook_LATITUDE','Clamp_Hook_LONGITUDE'
+];
+
+function writeHeader(ws){
+  HEADERS.forEach((h, i) => setCell(ws, 0, i, h));
+  ws['!ref'] = 'A1:AI2000';
+}
+
+// ================= MAIN =================
 function generate(){
-  const file=document.getElementById('file').files[0];
-  if(!file) return alert('Upload DATABASE');
+  const file = document.getElementById('file').files[0];
+  if (!file) return alert('Upload DATA BASE.xlsx');
 
-  const reader=new FileReader();
-  reader.onload=e=>{
-    const wb=XLSX.read(e.target.result,{type:'binary'});
-    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+  const reader = new FileReader();
+  reader.onload = e => {
+    const wb = XLSX.read(e.target.result, { type:'binary' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
-    const ws={};
-    ws['!ref']='A1:AZ1000';
+    const A = {
+      area: area.value,
+      district: district.value,
+      subdistrict: subdistrict.value,
+      postcode: postcode.value,
+      fdt: fdt.value,
+      idarea: idarea.value
+    };
 
-    let rowHome=1; // BARIS 2
-    let rowPole=1; // BARIS 2
+    // Buat sheet kosong + header
+    const ws = {};
+    writeHeader(ws);
 
-    // ===== BUILD HOOK MAP =====
-    const hookMap={};
-    rows.forEach(r=>{
-      if(String(r.FolderPath||'').includes('/HOOK')){
-        hookMap[normalize(r.Name)] = getLatLon(r.X,r.Y);
+    // Cursor BARIS (ROW 2 => index 1)
+    let rowHome = 1;
+    let rowPole = 1;
+
+    // ===== HOOK MAP (Name -> X/Y) =====
+    const hookMap = {};
+    rows.forEach(r => {
+      if (String(r.FolderPath || '').toUpperCase().includes('/HOOK')) {
+        hookMap[normalize(r.Name)] = getLatLon(r.X, r.Y);
       }
     });
 
-    // ===== HOME =====
-    rows.forEach(r=>{
-      if(!String(r.FolderPath||'').includes('/HOME')) return;
+    // ===== HOME / HOME-BIZ (mulai BARIS 2) =====
+    rows.forEach(r => {
+      const fp = String(r.FolderPath || '');
+      if (!fp.includes('/HOME') && !fp.includes('/HOME-BIZ')) return;
 
-      const hook=hookMap[normalize(r.CLAIM_HOOK)]||{lat:'-',lon:'-'};
-      const home=getLatLon(r.X,r.Y);
+      const house = r.Name || '-';
+      const block = (/^[A-Za-z]\d+/.test(house)) ? house[0] : '-';
+      const homeC = getLatLon(r.X, r.Y);
+      const hookC = hookMap[normalize(r.CLAIM_HOOK)] || { lat:'-', lon:'-' };
 
-      set(ws,rowHome,0,'-');                  // A HOMEPASS_ID
-      set(ws,rowHome,3,r.JALAN||'-');         // D STREET
-      set(ws,rowHome,4,r.Name||'-');          // E HOUSE
-      set(ws,rowHome,13,home.lat);            // N LAT
-      set(ws,rowHome,14,home.lon);            // O LON
-      set(ws,rowHome,26,hook.lat);            // AA Clamp LAT
-      set(ws,rowHome,27,hook.lon);            // AB Clamp LON
+      // Kolom A–AB (HOME)
+      setCell(ws, rowHome, 0,  '-');                // A HOMEPASS_ID
+      setCell(ws, rowHome, 1,  A.area);             // B CLUSTER_NAME
+      setCell(ws, rowHome, 2,  'JL.');              // C PREFIX_ADDRESS
+      setCell(ws, rowHome, 3,  r.JALAN || '-');     // D STREET_NAME
+      setCell(ws, rowHome, 4,  house);              // E HOUSE_NUMBER
+      setCell(ws, rowHome, 5,  block);              // F BLOCK
+      setCell(ws, rowHome, 6,  '-');                // G FLOOR
+      setCell(ws, rowHome, 7,  '-');                // H RT
+      setCell(ws, rowHome, 8,  '-');                // I RW
+      setCell(ws, rowHome, 9,  A.district);         // J DISTRICT
+      setCell(ws, rowHome, 10, A.subdistrict);      // K SUB_DISTRICT
+      setCell(ws, rowHome, 11, A.fdt);              // L FDT_CODE
+      setCell(ws, rowHome, 12, r.FAT || '-');       // M FAT_CODE
+      setCell(ws, rowHome, 13, homeC.lat);          // N BUILDING_LATITUDE
+      setCell(ws, rowHome, 14, homeC.lon);          // O BUILDING_LONGITUDE
+      setCell(ws, rowHome, 15, '');                 // P Category BizPass
+      setCell(ws, rowHome, 16, A.postcode);         // Q POST CODE
+      setCell(ws, rowHome, 17, '-');                // R ADDRESS POLE / FAT
+      setCell(ws, rowHome, 18, 'O');                // S OV_UG
+      setCell(ws, rowHome, 19, 'NEED SURVEY');      // T HOUSE_COMMENT_
+      setCell(ws, rowHome, 20, '-');                // U BUILDING_NAME
+      setCell(ws, rowHome, 21, '-');                // V TOWER
+      setCell(ws, rowHome, 22, '-');                // W APTN
+      setCell(ws, rowHome, 23, '-');                // X FIBER_NODE__HFC_
+      setCell(ws, rowHome, 24, A.idarea);           // Y ID_Area
+      setCell(ws, rowHome, 25, r.CLAIM_HOOK || '-');// Z Clamp_Hook_ID
+      setCell(ws, rowHome, 26, 'FAT EXT');          // AA DEPLOYMENT_TYPE
+      setCell(ws, rowHome, 27, 'YES');              // AB NEED_SURVEY
+
+      // Kolom AC–AI dikosongkan untuk HOME
+      setCell(ws, rowHome, 28, '-');                // AC Pole ID (New)
+      setCell(ws, rowHome, 29, '-');                // AD Lat NEW
+      setCell(ws, rowHome, 30, '-');                // AE Long NEW
+      setCell(ws, rowHome, 31, 'LN (Existing)');    // AF Provider
+      setCell(ws, rowHome, 32, 'Pole 7/250');       // AG Type
+      setCell(ws, rowHome, 33, '');                 // AH LINE
+      setCell(ws, rowHome, 34, '-');                // AI FAT ID/NETWORK ID
+      setCell(ws, rowHome, 35, hookC.lat);          // AJ Clamp_Hook_LATITUDE
+      setCell(ws, rowHome, 36, hookC.lon);          // AK Clamp_Hook_LONGITUDE
 
       rowHome++;
     });
 
-    // ===== POLE (MULAI BARIS 2 JUGA) =====
-    const poleMap={};
-    rows.forEach(r=>{
-      if(String(r.FolderPath||'').includes('/POLE')){
-        const k=normalize(r.Name);
-        if(!poleMap[k]){
-          poleMap[k]={name:r.Name,coord:getLatLon(r.X,r.Y),fat:r.FAT||'-'};
+    // ===== POLE (AC–AI mulai BARIS 2 juga) =====
+    const poleMap = {};
+    rows.forEach(r => {
+      if (String(r.FolderPath || '').toUpperCase().includes('/POLE')) {
+        const k = normalize(r.Name);
+        if (!poleMap[k]) {
+          poleMap[k] = { name:r.Name, coord:getLatLon(r.X, r.Y), fat:r.FAT || '-' };
         }
       }
     });
 
     Object.values(poleMap)
-      .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))
-      .forEach(p=>{
-        set(ws,rowPole,28,p.name);       // AC Pole ID
-        set(ws,rowPole,29,p.coord.lat); // AD Lat
-        set(ws,rowPole,30,p.coord.lon); // AE Lon
-        set(ws,rowPole,31,'LN (Existing)');
-        set(ws,rowPole,32,'Pole 7/250');
-        set(ws,rowPole,34,p.fat||'-');  // AI FAT
+      .sort((a,b)=>a.name.localeCompare(b.name, undefined, { numeric:true }))
+      .forEach(p => {
+        // Kolom AC–AI (POLE)
+        setCell(ws, rowPole, 28, p.name);        // AC Pole ID (New)
+        setCell(ws, rowPole, 29, p.coord.lat);   // AD Coordinate (Lat) NEW
+        setCell(ws, rowPole, 30, p.coord.lon);   // AE Coordinate (Long) NEW
+        setCell(ws, rowPole, 31, 'LN (Existing)');// AF Provider
+        setCell(ws, rowPole, 32, 'Pole 7/250');  // AG Type
+        setCell(ws, rowPole, 33, '');            // AH LINE
+        setCell(ws, rowPole, 34, p.fat || '-');  // AI FAT ID/NETWORK ID
 
         rowPole++;
       });
 
-    const outWB=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(outWB,ws,'MASTER_POP_UP');
-    XLSX.writeFile(outWB,'MASTER_POP_UP.xlsx');
+    const outWB = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(outWB, ws, 'MASTER_POP_UP');
+    XLSX.writeFile(outWB, 'MASTER_POP_UP.xlsx');
   };
+
   reader.readAsBinaryString(file);
 }
 </script>
+
 </body>
 </html>
