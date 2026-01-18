@@ -24,7 +24,7 @@
 <input id="fdt" placeholder="FDT Code">
 <input id="idarea" placeholder="ID Area">
 
-<button onclick="generate()">Generate Master Pop Up</button>
+<button type="button" onclick="generate()">Generate Master Pop Up</button>
 
 <script>
 // ================= UTIL =================
@@ -32,11 +32,9 @@ function normalize(v) {
   return String(v ?? '').trim().toUpperCase();
 }
 
-// Latitude = nilai abs <= 90
 function getLatLon(x, y) {
   const X = Number(x), Y = Number(y);
   if (!Number.isFinite(X) || !Number.isFinite(Y)) return { lat: '-', lon: '-' };
-
   if (Math.abs(X) <= 90 && Math.abs(Y) > 90) return { lat: X, lon: Y };
   if (Math.abs(Y) <= 90 && Math.abs(X) > 90) return { lat: Y, lon: X };
   return { lat: X, lon: Y };
@@ -72,20 +70,16 @@ function generate() {
       String(r.FolderPath || '').toUpperCase().includes('/POLE')
     );
 
-    // ===== HOOK MAP (KEY = Name, contoh: 13R) =====
+    // ===== HOOK MAP =====
     const hookMap = {};
     rows.forEach(r => {
-      const fp = String(r.FolderPath || '').toUpperCase();
-      if (!fp.includes('/HOOK')) return;
-
-      const key = normalize(r.Name); // 🔥 ID HOOK ada di kolom Name
-      const coord = getLatLon(r.X, r.Y); // 🔥 ambil X & Y baris HOOK (kuning)
-      if (key && coord.lat !== '-' && coord.lon !== '-' && !hookMap[key]) {
-        hookMap[key] = coord;
+      if (String(r.FolderPath || '').toUpperCase().includes('/HOOK')) {
+        const key = normalize(r.Name);
+        const coord = getLatLon(r.X, r.Y);
+        if (key && !hookMap[key]) hookMap[key] = coord;
       }
     });
 
-    // ===== HOME / HOME-BIZ =====
     rows.forEach(r => {
       const fp = String(r.FolderPath || '');
       if (!fp.includes('/HOME') && !fp.includes('/HOME-BIZ')) return;
@@ -93,58 +87,55 @@ function generate() {
       const house = r.Name || '-';
 
       let block = '-';
-      let streetNum = house;
-      if (/^[A-Za-z]\d+/.test(house)) {
-        block = house[0];
-        streetNum = house.slice(1);
-      }
+      if (/^[A-Za-z]\d+/.test(house)) block = house[0];
 
       const homeCoord = getLatLon(r.X, r.Y);
-
       const pole = poles.find(p => p.FAT === r.FAT);
       const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '-', lon: '-' };
-
-      // 🔥 FINAL: Clamp Hook ambil dari HOOK.Name == CLAIM_HOOK
-      const hookKey = normalize(r.CLAIM_HOOK); // misal: 13R
-      const hookCoord = hookMap[hookKey] || { lat: '-', lon: '-' };
+      const hookCoord = hookMap[normalize(r.CLAIM_HOOK)] || { lat: '-', lon: '-' };
 
       output.push({
-        HOMEPASS_ID: '-',
-        CLUSTER_NAME: area.area,
-        PREFIX_ADDRESS: 'JL.',
-        STREET_NAME: r.JALAN || '-',
-        HOUSE_NUMBER: house,
-        BLOCK: block,
-        STREET_NUMBER: streetNum,
-        FLOOR: '-', RT: '-', RW: '-',
-        DISTRICT: area.district,
-        SUB_DISTRICT: area.subdistrict,
-        POST_CODE: area.postcode,
-        FDT_CODE: area.fdt,
-        FAT_CODE: r.FAT || '-',
-        BUILDING_LATITUDE: homeCoord.lat,
-        BUILDING_LONGITUDE: homeCoord.lon,
-        ADDRESS_POLE_FAT: '-',
-        OV_UG: 'O',
-        HOUSE_COMMENT_: 'NEED SURVEY',
-        BUILDING_NAME: '-', TOWER: '-', APTN: '-', FIBER_NODE__HFC_: '-',
-        ID_AREA: area.idarea,
-        Clamp_Hook_ID: r.CLAIM_HOOK || '-',
-        DEPLOYMENT_TYPE: 'FAT EXT',
-        NEED_SURVEY: 'YES',
-        Pole_ID_New: pole ? pole.Name : '-',
-        Coordinate_Lat_NEW: poleCoord.lat,
-        Coordinate_Long_NEW: poleCoord.lon,
-        Pole_Provider_New: 'LN (Existing)',
-        Pole_Type: 'Pole 7/250',
-        LINE: '',
-        FAT_ID_NETWORK_ID: pole ? pole.FAT : '-',
-        Clamp_Hook_LATITUDE: hookCoord.lat,
-        Clamp_Hook_LONGITUDE: hookCoord.lon
+        'HOMEPASS_ID': '-',
+        'CLUSTER_NAME': area.area,
+        'PREFIX_ADDRESS': 'JL.',
+        'STREET_NAME': r.JALAN || '-',
+        'HOUSE_NUMBER': house,
+        'BLOCK': block,
+        'FLOOR': '-',
+        'RT': '-',
+        'RW': '-',
+        'DISTRICT': area.district,
+        'SUB_DISTRICT': area.subdistrict,
+        'FDT_CODE': area.fdt,
+        'FAT_CODE': r.FAT || '-',
+        'BUILDING_LATITUDE': homeCoord.lat,
+        'BUILDING_LONGITUDE': homeCoord.lon,
+        'Category BizPass': '',
+        'POST CODE': area.postcode,
+        'ADDRESS POLE / FAT': '-',
+        'OV_UG': 'O',
+        'HOUSE_COMMENT_': 'NEED SURVEY',
+        'BUILDING_NAME': '-',
+        'TOWER': '-',
+        'APTN': '-',
+        'FIBER_NODE__HFC_': '-',
+        'ID_Area': area.idarea,
+        'Clamp_Hook_ID': r.CLAIM_HOOK || '-',
+        'DEPLOYMENT_TYPE': 'FAT EXT',
+        'NEED_SURVEY': 'YES',
+        'Pole ID (New)': pole ? pole.Name : '-',
+        'Coordinate (Lat) NEW': poleCoord.lat,
+        'Coordinate (Long) NEW': poleCoord.lon,
+        'Pole Provider (New)': 'LN (Existing)',
+        'Pole Type': 'Pole 7/250',
+        'LINE': '',
+        'FAT ID/NETWORK ID': pole ? pole.FAT : '-',
+        'Clamp_Hook_LATITUDE': hookCoord.lat,
+        'Clamp_Hook_LONGITUDE': hookCoord.lon
       });
     });
 
-    const ws = XLSX.utils.json_to_sheet(output);
+    const ws = XLSX.utils.json_to_sheet(output, { skipHeader: false });
     const wbOut = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wbOut, ws, 'MASTER_POP_UP');
     XLSX.writeFile(wbOut, 'MASTER_POP_UP.xlsx');
