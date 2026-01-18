@@ -27,7 +27,6 @@
 <button onclick="generate()">Generate Master Pop Up</button>
 
 <script>
-// ===== MAIN =====
 function generate() {
   const file = document.getElementById('file').files[0];
   if (!file) return alert('Upload DATA BASE.xlsx');
@@ -60,9 +59,9 @@ function generate() {
       const pole = poles.find(p => p.FAT === r.FAT);
       const hook = hooks.find(h => h.Name === r.CLAIM_HOOK);
 
-      // Mengambil Latitude dari X dan Longitude dari Y
-      const lat = r.X || '-';
-      const lon = r.Y || '-';
+      // 🔒 DIKUNCI: LAT = X, LON = Y
+      const lat = r.X ?? r['X'] ?? r['X '] ?? r[' X'] ?? '-';
+      const lon = r.Y ?? r['Y'] ?? r['Y '] ?? r[' Y'] ?? '-';
 
       output.push({
         HOMEPASS_ID: '-',
@@ -80,8 +79,8 @@ function generate() {
         FDT_CODE: area.fdt,
 
         FAT_CODE: r.FAT || '-',
-        BUILDING_LATITUDE: lat,  // X sebagai Latitude
-        BUILDING_LONGITUDE: lon, // Y sebagai Longitude
+        BUILDING_LATITUDE: lat,
+        BUILDING_LONGITUDE: lon,
 
         ADDRESS_POLE_FAT: '-',
         OV_UG: 'O',
@@ -93,18 +92,18 @@ function generate() {
         DEPLOYMENT_TYPE: 'FAT EXT',
         NEED_SURVEY: 'YES',
 
-        Pole_ID_New: pole ? pole.Name : '-',
-        Coordinate_Lat_NEW: pole ? pole.X : '-',
-        Coordinate_Long_NEW: pole ? pole.Y : '-',
+        Pole_ID_New: pole?.Name || '-',
+        Coordinate_Lat_NEW: pole?.X ?? '-',
+        Coordinate_Long_NEW: pole?.Y ?? '-',
 
         Pole_Provider_New: 'LN (Existing)',
         Pole_Type: 'Pole 7/250',
         LINE: '',
 
-        FAT_ID_NETWORK_ID: pole ? pole.FAT : '-',
+        FAT_ID_NETWORK_ID: pole?.FAT || '-',
 
-        Clamp_Hook_LATITUDE: hook ? hook.X : '-',
-        Clamp_Hook_LONGITUDE: hook ? hook.Y : '-'
+        Clamp_Hook_LATITUDE: hook?.X ?? '-',
+        Clamp_Hook_LONGITUDE: hook?.Y ?? '-'
       });
     });
 
