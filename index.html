@@ -27,6 +27,7 @@
 <button onclick="generate()">Generate Master Pop Up</button>
 
 <script>
+// ===== MAIN =====
 function generate() {
   const file = document.getElementById('file').files[0];
   if (!file) return alert('Upload DATA BASE.xlsx');
@@ -40,17 +41,17 @@ function generate() {
     const area = getArea();
     const output = [];
 
-    const poles = rows.filter(r => r.FolderPath && r.FolderPath.includes('/POLE/'));
-    const hooks = rows.filter(r => r.FolderPath && r.FolderPath.includes('/HOOK/'));
+    const poles = rows.filter(r => r.FolderPath?.includes('/POLE/'));
+    const hooks = rows.filter(r => r.FolderPath?.includes('/HOOK/'));
 
     rows.forEach(r => {
       if (!r.FolderPath) return;
       if (!r.FolderPath.includes('/HOME') && !r.FolderPath.includes('/HOME-BIZ')) return;
 
       const house = r.Name || '-';
+
       let block = '-';
       let streetNum = house;
-
       if (/^[A-Za-z]\d+/.test(house)) {
         block = house[0];
         streetNum = house.slice(1);
@@ -58,6 +59,10 @@ function generate() {
 
       const pole = poles.find(p => p.FAT === r.FAT);
       const hook = hooks.find(h => h.Name === r.CLAIM_HOOK);
+
+      // Mengambil Latitude dari X dan Longitude dari Y
+      const lat = r.X || '-';
+      const lon = r.Y || '-';
 
       output.push({
         HOMEPASS_ID: '-',
@@ -68,28 +73,36 @@ function generate() {
         BLOCK: block,
         STREET_NUMBER: streetNum,
         FLOOR: '-', RT: '-', RW: '-',
+
         DISTRICT: area.district,
         SUB_DISTRICT: area.subdistrict,
         POST_CODE: area.postcode,
         FDT_CODE: area.fdt,
+
         FAT_CODE: r.FAT || '-',
-        BUILDING_LATITUDE: r.X || '-',
-        BUILDING_LONGITUDE: r.Y || '-',
+        BUILDING_LATITUDE: lat,  // X sebagai Latitude
+        BUILDING_LONGITUDE: lon, // Y sebagai Longitude
+
         ADDRESS_POLE_FAT: '-',
         OV_UG: 'O',
         HOUSE_COMMENT_: 'NEED SURVEY',
         BUILDING_NAME: '-', TOWER: '-', APTN: '-', FIBER_NODE__HFC_: '-',
+
         ID_AREA: area.idarea,
         Clamp_Hook_ID: r.CLAIM_HOOK || '-',
         DEPLOYMENT_TYPE: 'FAT EXT',
         NEED_SURVEY: 'YES',
+
         Pole_ID_New: pole ? pole.Name : '-',
         Coordinate_Lat_NEW: pole ? pole.X : '-',
         Coordinate_Long_NEW: pole ? pole.Y : '-',
+
         Pole_Provider_New: 'LN (Existing)',
         Pole_Type: 'Pole 7/250',
         LINE: '',
+
         FAT_ID_NETWORK_ID: pole ? pole.FAT : '-',
+
         Clamp_Hook_LATITUDE: hook ? hook.X : '-',
         Clamp_Hook_LONGITUDE: hook ? hook.Y : '-'
       });
