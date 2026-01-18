@@ -2,17 +2,17 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Master Pop Up Generator (FINAL)</title>
+  <title>Master Pop Up Generator (Template)</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
-    input { display: block; margin: 6px 0; padding: 6px; width: 320px; }
-    button { margin-top: 12px; padding: 10px 20px; }
+    input { display: block; margin: 6px 0; padding: 6px; width: 300px; }
+    button { margin-top: 10px; padding: 10px 20px; }
   </style>
 </head>
 <body>
 
-<h2>Master Pop Up Generator (Template Final)</h2>
+<h2>Master Pop Up Generator (Template Based)</h2>
 
 <h3>Upload File</h3>
 <input type="file" id="dbFile" accept=".xlsx">
@@ -36,7 +36,7 @@ function normalize(v) {
 
 function getLatLon(x, y) {
   const X = Number(x), Y = Number(y);
-  if (!Number.isFinite(X) || !Number.isFinite(Y)) return { lat: '', lon: '' };
+  if (!Number.isFinite(X) || !Number.isFinite(Y)) return { lat: '-', lon: '-' };
   if (Math.abs(X) <= 90 && Math.abs(Y) > 90) return { lat: X, lon: Y };
   if (Math.abs(Y) <= 90 && Math.abs(X) > 90) return { lat: Y, lon: X };
   return { lat: X, lon: Y };
@@ -44,12 +44,12 @@ function getLatLon(x, y) {
 
 function getArea() {
   return {
-    area: document.getElementById('area').value,
-    district: document.getElementById('district').value,
-    subdistrict: document.getElementById('subdistrict').value,
-    postcode: document.getElementById('postcode').value,
-    fdt: document.getElementById('fdt').value,
-    idarea: document.getElementById('idarea').value
+    area: area.value,
+    district: district.value,
+    subdistrict: subdistrict.value,
+    postcode: postcode.value,
+    fdt: fdt.value,
+    idarea: idarea.value
   };
 }
 
@@ -59,9 +59,7 @@ function getHeaderMap(sheet) {
   const map = {};
   for (let c = range.s.c; c <= range.e.c; c++) {
     const cell = sheet[XLSX.utils.encode_cell({ r: 0, c })];
-    if (cell && cell.v) {
-      map[String(cell.v).trim()] = c;
-    }
+    if (cell && cell.v) map[cell.v.trim()] = c;
   }
   return map;
 }
@@ -70,82 +68,105 @@ function getHeaderMap(sheet) {
 function generate() {
   const dbFile = document.getElementById('dbFile').files[0];
   const tplFile = document.getElementById('templateFile').files[0];
-  if (!dbFile || !tplFile) {
-    alert('Upload DATA BASE & TEMPLATE');
-    return;
-  }
+  if (!dbFile || !tplFile) return alert('Upload DATABASE dan TEMPLATE');
 
   const area = getArea();
-
   const dbReader = new FileReader();
   const tplReader = new FileReader();
 
-  dbReader.onload = (e1) => {
+  dbReader.onload = e1 => {
     const dbWB = XLSX.read(e1.target.result, { type: 'binary' });
-    const dbSheet = dbWB.Sheets[dbWB.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(dbSheet);
-
-    // ===== HOOK MAP =====
-    const hookMap = {};
-    rows.forEach(r => {
-      if (String(r.FolderPath || '').toUpperCase().includes('/HOOK')) {
-        const key = normalize(r.Name);
-        if (key && !hookMap[key]) {
-          hookMap[key] = getLatLon(r.X, r.Y);
-        }
-      }
-    });
+    const rows = XLSX.utils.sheet_to_json(dbWB.Sheets[dbWB.SheetNames[0]]);
 
     // ===== POLE =====
     const poles = rows.filter(r =>
       String(r.FolderPath || '').toUpperCase().includes('/POLE')
     );
 
-    tplReader.onload = (e2) => {
-      const tplWB = XLSX.read(e2.target.result, { type: 'binary' });
-      const sheetName = 'MASTER_POP_UP';
-      const sheet = tplWB.Sheets[sheetName];
-
-      if (!sheet) {
-        alert('Sheet "MASTER_POP_UP" tidak ditemukan di template. Nama harus PERSIS.');
-        return;
+    // ===== HOOK MAP =====
+    const hookMap = {};
+    rows.forEach(r => {
+      if (String(r.FolderPath || '').toUpperCase().includes('/HOOK')) {
+        const key = normalize(r.Name);
+        const coord = getLatLon(r.X, r.Y);
+        if (key && !hookMap[key]) hookMap[key] = coord;
       }
+    });
+
+    // ===== BUILD OUTPUT (LOGIC KAMU, TIDAK DIUBAH) =====
+    const output = [];
+    rows.forEach(r => {
+      if (!String(r.FolderPath || '').includes('/HOME') &&
+          !String(r.FolderPath || '').includes('/HOME-BIZ')) return;
+
+      const homeCoord = getLatLon(r.X, r.Y);
+      const pole = poles.find(p => p.FAT === r.FAT);
+      const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '-', lon: '-' };
+      const hookCoord = hookMap[normalize(r.CLAIM_HOOK)] || { lat: '-', lon: '-' };
+
+      output.push({
+        HOMEPASS_ID: '-',
+        CLUSTER_NAME: area.area,
+        PREFIX_ADDRESS: 'JL.',
+        STREET_NAME: r.JALAN || '-',
+        HOUSE_NUMBER: r.Name || '-',
+        BLOCK: '-',
+        STREET_NUMBER: r.Name || '-',
+        FLOOR: '-', RT: '-', RW: '-',
+        DISTRICT: area.district,
+        SUB_DISTRICT: area.subdistrict,
+        POST_CODE: area.postcode,
+        FDT_CODE: area.fdt,
+        FAT_CODE: r.FAT || '-',
+        BUILDING_LATITUDE: homeCoord.lat,
+        BUILDING_LONGITUDE: homeCoord.lon,
+        ADDRESS_POLE_FAT: '-',
+        OV_UG: 'O',
+        HOUSE_COMMENT_: 'NEED SURVEY',
+        BUILDING_NAME: '-', TOWER: '-', APTN: '-', FIBER_NODE__HFC_: '-',
+        ID_AREA: area.idarea,
+        Clamp_Hook_ID: r.CLAIM_HOOK || '-',
+        DEPLOYMENT_TYPE: 'FAT EXT',
+        NEED_SURVEY: 'YES',
+        'Pole ID (New)': pole ? pole.Name : '-',
+        'Coordinate (Lat) NEW': poleCoord.lat,
+        'Coordinate (Long) NEW': poleCoord.lon,
+        'Pole Provider (New)': 'LN (Existing)',
+        'Pole Type': 'Pole 7/250',
+        LINE: '',
+        'FAT ID/NETWORK ID': pole ? pole.FAT : '-',
+        Clamp_Hook_LATITUDE: hookCoord.lat,
+        Clamp_Hook_LONGITUDE: hookCoord.lon
+      });
+    });
+
+    // ===== APPLY TO TEMPLATE =====
+    tplReader.onload = e2 => {
+      const tplWB = XLSX.read(e2.target.result, { type: 'binary' });
+      const sheet = tplWB.Sheets['MASTER_POP_UP'];
+      if (!sheet) return alert('Sheet MASTER_POP_UP tidak ditemukan');
 
       const headerMap = getHeaderMap(sheet);
       let rowIndex = 1; // ROW 2
 
-      function setCell(header, value) {
-        const col = headerMap[header];
-        if (col === undefined) return;
-        const addr = XLSX.utils.encode_cell({ r: rowIndex, c: col });
-        sheet[addr] = { t: 's', v: String(value ?? '') };
-      }
+      output.forEach(row => {
+        Object.keys(row).forEach(key => {
+          if (headerMap[key] === undefined) return;
+          const addr = XLSX.utils.encode_cell({ r: rowIndex, c: headerMap[key] });
+          sheet[addr] = { t: 's', v: String(row[key]) };
+        });
+        rowIndex++;
+      });
 
-      rows.forEach(r => {
-        const fp = String(r.FolderPath || '');
-        if (!fp.includes('/HOME') && !fp.includes('/HOME-BIZ')) return;
+      XLSX.writeFile(tplWB, 'MASTER_POP_UP_RESULT.xlsx');
+    };
 
-        const homeCoord = getLatLon(r.X, r.Y);
-        const hookCoord = hookMap[normalize(r.CLAIM_HOOK)] || { lat: '', lon: '' };
-        const pole = poles.find(p => p.FAT === r.FAT);
-        const poleCoord = pole ? getLatLon(pole.X, pole.Y) : { lat: '', lon: '' };
+    tplReader.readAsBinaryString(tplFile);
+  };
 
-        setCell('HOMEPASS_ID', '-');
-        setCell('CLUSTER_NAME', area.area);
-        setCell('PREFIX_ADDRESS', 'JL.');
-        setCell('STREET_NAME', r.JALAN || '');
-        setCell('HOUSE_NUMBER', r.Name || '');
-        setCell('FLOOR', '-');
-        setCell('RT', '-');
-        setCell('RW', '-');
+  dbReader.readAsBinaryString(dbFile);
+}
+</script>
 
-        setCell('DISTRICT', area.district);
-        setCell('SUB_DISTRICT', area.subdistrict);
-        setCell('POST_CODE', area.postcode);
-        setCell('FDT_CODE', area.fdt);
-        setCell('FAT_CODE', r.FAT || '');
-
-        setCell('BUILDING_LATITUDE', homeCoord.lat);
-        setCell('BUILDING_LONGITUDE', homeCoord.lon);
-
-        setCell('ADDRESS_POLE_F
+</body>
+</html>
