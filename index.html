@@ -2,20 +2,27 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Master Pop Up Generator (FINAL)</title>
+  <title>Master Pop Up Generator (FINAL KMZ)</title>
+
+  <!-- XLSX -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+  <!-- JSZip (KMZ parser) -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
-    input { display:block; margin:6px 0; padding:6px; width:320px; }
-    button { margin-top:10px; padding:10px 20px; }
+    input { display:block; margin:6px 0; padding:6px; width:340px; }
+    button { margin-top:10px; padding:10px 24px; }
   </style>
 </head>
 <body>
 
-<h2>Master Pop Up Generator (FINAL)</h2>
+<h2>Master Pop Up Generator (FINAL + KMZ LINE)</h2>
 
-<input type="file" id="file" accept=".xlsx">
-<input type="file" id="kmz" accept=".kmz,.kml">
+<h3>Upload File</h3>
+<input type="file" id="dbFile" accept=".xlsx">
+<input type="file" id="kmzFile" accept=".kmz">
 
 <h3>Input Area</h3>
 <input id="area" placeholder="Nama Area">
@@ -25,27 +32,25 @@
 <input id="fdt" placeholder="FDT Code">
 <input id="idarea" placeholder="ID Area">
 
-<button type="button" onclick="generate()">Generate Master Pop Up</button>
+<button onclick="generate()">Generate Master Pop Up</button>
 
 <script>
 // ================= UTIL =================
 const normalize = v => String(v ?? '').trim().toUpperCase();
-const roundKey = (lat, lon) => `${Number(lat).toFixed(6)},${Number(lon).toFixed(6)}`;
 
-function getLatLon(x, y){
+function getLatLon(x,y){
   const X = Number(x), Y = Number(y);
-  if (!Number.isFinite(X) || !Number.isFinite(Y)) return { lat:'-', lon:'-' };
-  if (Math.abs(X) <= 90 && Math.abs(Y) > 90) return { lat:X, lon:Y };
-  if (Math.abs(Y) <= 90 && Math.abs(X) > 90) return { lat:Y, lon:X };
-  return { lat:X, lon:Y };
+  if (!isFinite(X) || !isFinite(Y)) return {lat:'-',lon:'-'};
+  if (Math.abs(X)<=90 && Math.abs(Y)>90) return {lat:X,lon:Y};
+  if (Math.abs(Y)<=90 && Math.abs(X)>90) return {lat:Y,lon:X};
+  return {lat:X,lon:Y};
 }
 
-function setCell(ws, r, c, v){
-  ws[XLSX.utils.encode_cell({ r, c })] = { t:'s', v: String(v ?? '-') };
+function setCell(ws,r,c,v){
+  ws[XLSX.utils.encode_cell({r,c})] = { t:'s', v:String(v ?? '-') };
 }
 
-// ================= HEADER (URUTAN FINAL) =================
-// A..AK = 0..36
+// ================= HEADER =================
 const HEADERS = [
   'HOMEPASS_ID','CLUSTER_NAME','PREFIX_ADDRESS','STREET_NAME','HOUSE_NUMBER','BLOCK',
   'FLOOR','RT','RW','DISTRICT','SUB_DISTRICT','FDT_CODE','FAT_CODE',
@@ -59,149 +64,123 @@ const HEADERS = [
 
 function writeHeader(ws){
   HEADERS.forEach((h,i)=>setCell(ws,0,i,h));
-  ws['!ref'] = 'A1:AK2000';
+  ws['!ref'] = 'A1:AK3000';
 }
 
 // ================= KMZ PARSER =================
-// Ambil LINE dari CABLE DISTRIBUTION (Polyline) → map vertex(lat,lon) => [LINE]
-async function buildKmzLineMap(kmzFile){
-  if (!kmzFile) return {}; // KMZ opsional
+async function parseKMZ(file){
+  const zip = await JSZip.loadAsync(file);
+  const kmlFile = zip.file(/\.kml$/i)[0];
+  const text = await kmlFile.async("text");
+  const xml = new DOMParser().parseFromString(text,"text/xml");
 
-  // baca KMZ (zip) atau KML langsung
-  const buf = await kmzFile.arrayBuffer();
-  let kmlText = '';
+  const coordLineMap = {};
 
-  // cek apakah KMZ (zip)
-  try{
-    const zip = new JSZip();
-    const z = await zip.loadAsync(buf);
-    const kmlName = Object.keys(z.files).find(n => n.toLowerCase().endsWith('.kml'));
-    if (!kmlName) return {};
-    kmlText = await z.files[kmlName].async('text');
-  }catch(e){
-    // bukan zip → anggap KML
-    kmlText = new TextDecoder().decode(buf);
-  }
+  [...xml.getElementsByTagName("Placemark")].forEach(pm=>{
+    const name = pm.getElementsByTagName("name")[0]?.textContent?.trim();
+    const coords = pm.getElementsByTagName("coordinates")[0]?.textContent;
+    if(!name || !coords) return;
 
-  const parser = new DOMParser();
-  const xml = parser.parseFromString(kmlText, 'text/xml');
-
-  const lineMap = {}; // "lat,lon" => Set(LINE)
-  const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
-
-  placemarks.forEach(pm=>{
-    const name = pm.getElementsByTagName('name')[0]?.textContent?.trim();
-    if (!name) return;
-
-    // filter folder CABLE DISTRIBUTION (opsional, aman)
-    const parentText = pm.parentNode?.textContent?.toUpperCase() || '';
-    if (!parentText.includes('CABLE') && !parentText.includes('DISTRIBUTION')) return;
-
-    const lineStrings = pm.getElementsByTagName('LineString');
-    Array.from(lineStrings).forEach(ls=>{
-      const coordsText = ls.getElementsByTagName('coordinates')[0]?.textContent;
-      if (!coordsText) return;
-
-      // format: lon,lat[,alt] dipisah spasi
-      coordsText.trim().split(/\s+/).forEach(pair=>{
-        const [lon, lat] = pair.split(',').map(Number);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-        const key = roundKey(lat, lon);
-        if (!lineMap[key]) lineMap[key] = new Set();
-        lineMap[key].add(name);
-      });
+    coords.trim().split(/\s+/).forEach(c=>{
+      const [lon,lat] = c.split(',').map(Number);
+      if(!isFinite(lat)||!isFinite(lon)) return;
+      const key = `${lat.toFixed(6)},${lon.toFixed(6)}`;
+      coordLineMap[key] = coordLineMap[key] || new Set();
+      coordLineMap[key].add(name);
     });
   });
 
-  // ubah Set → Array
-  Object.keys(lineMap).forEach(k => lineMap[k] = Array.from(lineMap[k]));
-  return lineMap;
+  Object.keys(coordLineMap).forEach(k=>{
+    coordLineMap[k] = [...coordLineMap[k]].join(',');
+  });
+
+  return coordLineMap;
 }
 
 // ================= MAIN =================
 async function generate(){
-  const dbFile = document.getElementById('file').files[0];
-  const kmzFile = document.getElementById('kmz').files[0];
-  if (!dbFile) return alert('Upload DATA BASE.xlsx');
+  const dbFile = dbFileInput = document.getElementById('dbFile').files[0];
+  if(!dbFile) return alert('Upload DATABASE XLSX');
+
+  const kmzFile = document.getElementById('kmzFile').files[0];
+
+  const areaData = {
+    area: area.value,
+    district: district.value,
+    subdistrict: subdistrict.value,
+    postcode: postcode.value,
+    fdt: fdt.value,
+    idarea: idarea.value
+  };
 
   const reader = new FileReader();
-  reader.onload = async e => {
-    const wb = XLSX.read(e.target.result, { type:'binary' });
+  reader.onload = async e=>{
+    const wb = XLSX.read(e.target.result,{type:'binary'});
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
-    const A = {
-      area: area.value,
-      district: district.value,
-      subdistrict: subdistrict.value,
-      postcode: postcode.value,
-      fdt: fdt.value,
-      idarea: idarea.value
-    };
-
-    // Sheet kosong + header
     const ws = {};
     writeHeader(ws);
 
-    // Cursor baris (ROW 2 => index 1)
     let rowHome = 1;
     let rowPole = 1;
 
-    // ===== HOOK MAP (Name -> X/Y) =====
+    // ===== HOOK MAP =====
     const hookMap = {};
-    rows.forEach(r => {
-      if (String(r.FolderPath || '').toUpperCase().includes('/HOOK')) {
-        hookMap[normalize(r.Name)] = getLatLon(r.X, r.Y);
+    rows.forEach(r=>{
+      if(String(r.FolderPath||'').toUpperCase().includes('/HOOK')){
+        hookMap[normalize(r.Name)] = getLatLon(r.X,r.Y);
       }
     });
 
     // ===== FAT → LINE (fallback) =====
     const fatLineMap = {};
     rows.forEach(r=>{
-      if (String(r.FolderPath || '').toUpperCase().includes('/LINE') && r.FAT){
-        const f = normalize(r.FAT);
-        if (!fatLineMap[f]) fatLineMap[f] = [];
-        if (r.Name) fatLineMap[f].push(r.Name);
-      }
+      if(!r.FAT) return;
+      if(String(r.FAT).includes('A')) fatLineMap[r.FAT]='LINE A';
+      if(String(r.FAT).includes('B')) fatLineMap[r.FAT]='LINE B';
+      if(String(r.FAT).includes('C')) fatLineMap[r.FAT]='LINE C';
     });
 
-    // ===== KMZ → LINE (primary) =====
-    const kmzLineMap = await buildKmzLineMap(kmzFile);
+    // ===== KMZ LINE MAP =====
+    let kmzLineMap = {};
+    if(kmzFile){
+      kmzLineMap = await parseKMZ(kmzFile);
+    }
 
-    // ===== HOME / HOME-BIZ =====
-    rows.forEach(r => {
-      const fp = String(r.FolderPath || '');
-      if (!fp.includes('/HOME') && !fp.includes('/HOME-BIZ')) return;
+    // ===== HOME =====
+    rows.forEach(r=>{
+      const fp = String(r.FolderPath||'');
+      if(!fp.includes('/HOME')&&!fp.includes('/HOME-BIZ')) return;
 
-      const house = r.Name || '-';
-      const block = (/^[A-Za-z]\d+/.test(house)) ? house[0] : '-';
-      const homeC = getLatLon(r.X, r.Y);
-      const hookC = hookMap[normalize(r.CLAIM_HOOK)] || { lat:'-', lon:'-' };
+      const house = r.Name||'-';
+      const block = (/^[A-Za-z]\d+/.test(house))?house[0]:'-';
+      const hc = getLatLon(r.X,r.Y);
+      const hookC = hookMap[normalize(r.CLAIM_HOOK)]||{lat:'-',lon:'-'};
 
       setCell(ws,rowHome,0,'-');
-      setCell(ws,rowHome,1,A.area);
+      setCell(ws,rowHome,1,areaData.area);
       setCell(ws,rowHome,2,'JL.');
       setCell(ws,rowHome,3,r.JALAN||'-');
       setCell(ws,rowHome,4,house);
       setCell(ws,rowHome,5,block);
       setCell(ws,rowHome,6,'-'); setCell(ws,rowHome,7,'-'); setCell(ws,rowHome,8,'-');
-      setCell(ws,rowHome,9,A.district);
-      setCell(ws,rowHome,10,A.subdistrict);
-      setCell(ws,rowHome,11,A.fdt);
+      setCell(ws,rowHome,9,areaData.district);
+      setCell(ws,rowHome,10,areaData.subdistrict);
+      setCell(ws,rowHome,11,areaData.fdt);
       setCell(ws,rowHome,12,r.FAT||'-');
-      setCell(ws,rowHome,13,homeC.lat);
-      setCell(ws,rowHome,14,homeC.lon);
+      setCell(ws,rowHome,13,hc.lat);
+      setCell(ws,rowHome,14,hc.lon);
       setCell(ws,rowHome,15,'');
-      setCell(ws,rowHome,16,A.postcode);
+      setCell(ws,rowHome,16,areaData.postcode);
       setCell(ws,rowHome,17,'-');
       setCell(ws,rowHome,18,'O');
       setCell(ws,rowHome,19,'NEED SURVEY');
       setCell(ws,rowHome,20,'-'); setCell(ws,rowHome,21,'-'); setCell(ws,rowHome,22,'-');
       setCell(ws,rowHome,23,'-');
-      setCell(ws,rowHome,24,A.idarea);
+      setCell(ws,rowHome,24,areaData.idarea);
       setCell(ws,rowHome,25,r.CLAIM_HOOK||'-');
       setCell(ws,rowHome,26,'FAT EXT');
       setCell(ws,rowHome,27,'YES');
-      // Clamp Hook (AJ–AK) KHUSUS HOME
       setCell(ws,rowHome,35,hookC.lat);
       setCell(ws,rowHome,36,hookC.lon);
 
@@ -210,49 +189,40 @@ async function generate(){
 
     // ===== POLE =====
     const poleMap = {};
-    rows.forEach(r => {
-      if (String(r.FolderPath || '').toUpperCase().includes('/POLE')) {
+    rows.forEach(r=>{
+      if(String(r.FolderPath||'').toUpperCase().includes('/POLE')){
         const k = normalize(r.Name);
-        if (!poleMap[k]) {
-          poleMap[k] = { name:r.Name, coord:getLatLon(r.X, r.Y), fat:normalize(r.FAT||'') };
+        if(!poleMap[k]){
+          poleMap[k] = {name:r.Name,coord:getLatLon(r.X,r.Y),fat:r.FAT||'-'};
         }
       }
     });
 
     Object.values(poleMap)
-      .sort((a,b)=>a.name.localeCompare(b.name, undefined, { numeric:true }))
-      .forEach(p => {
-        // tentukan LINE: KMZ dulu, fallback FAT
-        let lineVal = '-';
-        const key = roundKey(p.coord.lat, p.coord.lon);
-        if (kmzLineMap[key] && kmzLineMap[key].length){
-          lineVal = kmzLineMap[key].join(',');
-        } else if (p.fat && fatLineMap[p.fat]){
-          lineVal = fatLineMap[p.fat].join(',');
-        }
+      .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))
+      .forEach(p=>{
+        const key = `${p.coord.lat.toFixed(6)},${p.coord.lon.toFixed(6)}`;
+        const line = kmzLineMap[key] || fatLineMap[p.fat] || '-';
 
-        setCell(ws,rowPole,28,p.name);          // AC Pole ID (New)
-        setCell(ws,rowPole,29,p.coord.lat);     // AD
-        setCell(ws,rowPole,30,p.coord.lon);     // AE
-        setCell(ws,rowPole,31,'LN (Existing)'); // AF
-        setCell(ws,rowPole,32,'Pole 7/250');    // AG
-        setCell(ws,rowPole,33,lineVal);         // AH LINE
-        setCell(ws,rowPole,34,p.fat||'-');      // AI FAT ID/NETWORK ID
+        setCell(ws,rowPole,28,p.name);
+        setCell(ws,rowPole,29,p.coord.lat);
+        setCell(ws,rowPole,30,p.coord.lon);
+        setCell(ws,rowPole,31,'LN (Existing)');
+        setCell(ws,rowPole,32,'Pole 7/250');
+        setCell(ws,rowPole,33,line);
+        setCell(ws,rowPole,34,p.fat||'-');
 
         rowPole++;
       });
 
     const outWB = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(outWB, ws, 'MASTER_POP_UP');
-    XLSX.writeFile(outWB, 'MASTER_POP_UP.xlsx');
+    XLSX.utils.book_append_sheet(outWB,ws,'MASTER_POP_UP');
+    XLSX.writeFile(outWB,'MASTER_POP_UP.xlsx');
   };
 
   reader.readAsBinaryString(dbFile);
 }
 </script>
-
-<!-- JSZip untuk baca KMZ -->
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 
 </body>
 </html>
