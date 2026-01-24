@@ -2,27 +2,28 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Master Pop Up Generator (FINAL KMZ)</title>
+  <title>Master Pop Up Generator (FINAL SEGMENT-BASED)</title>
 
   <!-- XLSX -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-
-  <!-- JSZip (KMZ parser) -->
+  <!-- JSZip (KMZ) -->
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
-    input { display:block; margin:6px 0; padding:6px; width:340px; }
+    input { display:block; margin:6px 0; padding:6px; width:360px; }
     button { margin-top:10px; padding:10px 24px; }
+    small { color:#666; }
   </style>
 </head>
 <body>
 
-<h2>Master Pop Up Generator (FINAL + KMZ LINE)</h2>
+<h2>Master Pop Up Generator (FINAL • Segment-Based LINE)</h2>
 
 <h3>Upload File</h3>
 <input type="file" id="dbFile" accept=".xlsx">
 <input type="file" id="kmzFile" accept=".kmz">
+<small>KMZ harus berisi CABLE DISTRIBUTION (Polyline)</small>
 
 <h3>Input Area</h3>
 <input id="area" placeholder="Nama Area">
@@ -64,47 +65,81 @@ const HEADERS = [
 
 function writeHeader(ws){
   HEADERS.forEach((h,i)=>setCell(ws,0,i,h));
-  ws['!ref'] = 'A1:AK3000';
+  ws['!ref'] = 'A1:AK5000';
 }
 
-// ================= KMZ PARSER =================
-async function parseKMZ(file){
+// ================= GEO (SEGMENT DISTANCE) =================
+// Approx meter per degree
+const M_PER_DEG_LAT = 111320;
+
+function metersPerDegLon(lat){
+  return 111320 * Math.cos(lat * Math.PI / 180);
+}
+
+// distance from point P to segment AB (meters)
+function distPointToSegMeters(p, a, b){
+  const latm = M_PER_DEG_LAT;
+  const lonm = metersPerDegLon((a.lat+b.lat)/2 || p.lat);
+
+  const px = p.lon * lonm, py = p.lat * latm;
+  const ax = a.lon * lonm, ay = a.lat * latm;
+  const bx = b.lon * lonm, by = b.lat * latm;
+
+  const vx = bx-ax, vy = by-ay;
+  const wx = px-ax, wy = py-ay;
+
+  const c1 = vx*wx + vy*wy;
+  if (c1 <= 0) return Math.hypot(px-ax, py-ay);
+  const c2 = vx*vx + vy*vy;
+  if (c2 <= c1) return Math.hypot(px-bx, py-by);
+
+  const t = c1 / c2;
+  const projx = ax + t*vx, projy = ay + t*vy;
+  return Math.hypot(px-projx, py-projy);
+}
+
+// ================= KMZ PARSER (SEGMENT-BASED) =================
+async function parseKMZSegments(file){
   const zip = await JSZip.loadAsync(file);
-  const kmlFile = zip.file(/\.kml$/i)[0];
-  const text = await kmlFile.async("text");
+  const kml = zip.file(/\.kml$/i)[0];
+  const text = await kml.async("text");
   const xml = new DOMParser().parseFromString(text,"text/xml");
 
-  const coordLineMap = {};
+  // return array of { name, segments:[[{lat,lon},{lat,lon}], ...] }
+  const lines = [];
 
   [...xml.getElementsByTagName("Placemark")].forEach(pm=>{
     const name = pm.getElementsByTagName("name")[0]?.textContent?.trim();
     const coords = pm.getElementsByTagName("coordinates")[0]?.textContent;
     if(!name || !coords) return;
 
-    coords.trim().split(/\s+/).forEach(c=>{
-      const [lon,lat] = c.split(',').map(Number);
-      if(!isFinite(lat)||!isFinite(lon)) return;
-      const key = `${lat.toFixed(6)},${lon.toFixed(6)}`;
-      coordLineMap[key] = coordLineMap[key] || new Set();
-      coordLineMap[key].add(name);
-    });
+    const pts = coords.trim().split(/\s+/)
+      .map(c=>{
+        const [lon,lat] = c.split(',').map(Number);
+        if(!isFinite(lat)||!isFinite(lon)) return null;
+        return {lat,lon};
+      })
+      .filter(Boolean);
+
+    const segs = [];
+    for(let i=0;i<pts.length-1;i++){
+      segs.push([pts[i], pts[i+1]]);
+    }
+    if(segs.length){
+      lines.push({ name, segments:segs });
+    }
   });
 
-  Object.keys(coordLineMap).forEach(k=>{
-    coordLineMap[k] = [...coordLineMap[k]].join(',');
-  });
-
-  return coordLineMap;
+  return lines;
 }
 
 // ================= MAIN =================
 async function generate(){
-  const dbFile = dbFileInput = document.getElementById('dbFile').files[0];
-  if(!dbFile) return alert('Upload DATABASE XLSX');
+  const db = document.getElementById('dbFile').files[0];
+  if(!db) return alert('Upload DATABASE XLSX');
+  const kmz = document.getElementById('kmzFile').files[0];
 
-  const kmzFile = document.getElementById('kmzFile').files[0];
-
-  const areaData = {
+  const A = {
     area: area.value,
     district: district.value,
     subdistrict: subdistrict.value,
@@ -132,7 +167,7 @@ async function generate(){
       }
     });
 
-    // ===== FAT → LINE (fallback) =====
+    // ===== FAT → LINE (fallback sederhana) =====
     const fatLineMap = {};
     rows.forEach(r=>{
       if(!r.FAT) return;
@@ -141,11 +176,9 @@ async function generate(){
       if(String(r.FAT).includes('C')) fatLineMap[r.FAT]='LINE C';
     });
 
-    // ===== KMZ LINE MAP =====
-    let kmzLineMap = {};
-    if(kmzFile){
-      kmzLineMap = await parseKMZ(kmzFile);
-    }
+    // ===== KMZ SEGMENTS =====
+    const kmzLines = kmz ? await parseKMZSegments(kmz) : [];
+    const TOL_M = 1.5; // toleransi 1.5 meter
 
     // ===== HOME =====
     rows.forEach(r=>{
@@ -158,26 +191,26 @@ async function generate(){
       const hookC = hookMap[normalize(r.CLAIM_HOOK)]||{lat:'-',lon:'-'};
 
       setCell(ws,rowHome,0,'-');
-      setCell(ws,rowHome,1,areaData.area);
+      setCell(ws,rowHome,1,A.area);
       setCell(ws,rowHome,2,'JL.');
       setCell(ws,rowHome,3,r.JALAN||'-');
       setCell(ws,rowHome,4,house);
       setCell(ws,rowHome,5,block);
       setCell(ws,rowHome,6,'-'); setCell(ws,rowHome,7,'-'); setCell(ws,rowHome,8,'-');
-      setCell(ws,rowHome,9,areaData.district);
-      setCell(ws,rowHome,10,areaData.subdistrict);
-      setCell(ws,rowHome,11,areaData.fdt);
+      setCell(ws,rowHome,9,A.district);
+      setCell(ws,rowHome,10,A.subdistrict);
+      setCell(ws,rowHome,11,A.fdt);
       setCell(ws,rowHome,12,r.FAT||'-');
       setCell(ws,rowHome,13,hc.lat);
       setCell(ws,rowHome,14,hc.lon);
       setCell(ws,rowHome,15,'');
-      setCell(ws,rowHome,16,areaData.postcode);
+      setCell(ws,rowHome,16,A.postcode);
       setCell(ws,rowHome,17,'-');
       setCell(ws,rowHome,18,'O');
       setCell(ws,rowHome,19,'NEED SURVEY');
       setCell(ws,rowHome,20,'-'); setCell(ws,rowHome,21,'-'); setCell(ws,rowHome,22,'-');
       setCell(ws,rowHome,23,'-');
-      setCell(ws,rowHome,24,areaData.idarea);
+      setCell(ws,rowHome,24,A.idarea);
       setCell(ws,rowHome,25,r.CLAIM_HOOK||'-');
       setCell(ws,rowHome,26,'FAT EXT');
       setCell(ws,rowHome,27,'YES');
@@ -187,7 +220,7 @@ async function generate(){
       rowHome++;
     });
 
-    // ===== POLE =====
+    // ===== POLE (segment-based LINE) =====
     const poleMap = {};
     rows.forEach(r=>{
       if(String(r.FolderPath||'').toUpperCase().includes('/POLE')){
@@ -201,15 +234,33 @@ async function generate(){
     Object.values(poleMap)
       .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))
       .forEach(p=>{
-        const key = `${p.coord.lat.toFixed(6)},${p.coord.lon.toFixed(6)}`;
-        const line = kmzLineMap[key] || fatLineMap[p.fat] || '-';
+        let linesFound = new Set();
+
+        if(isFinite(p.coord.lat) && isFinite(p.coord.lon)){
+          const P = {lat:p.coord.lat, lon:p.coord.lon};
+          kmzLines.forEach(L=>{
+            for(const [A1,A2] of L.segments){
+              if(distPointToSegMeters(P,A1,A2) <= TOL_M){
+                linesFound.add(L.name);
+                break;
+              }
+            }
+          });
+        }
+
+        let finalLine = '-';
+        if(linesFound.size){
+          finalLine = [...linesFound].join(',');
+        }else{
+          finalLine = fatLineMap[p.fat] || '-';
+        }
 
         setCell(ws,rowPole,28,p.name);
         setCell(ws,rowPole,29,p.coord.lat);
         setCell(ws,rowPole,30,p.coord.lon);
         setCell(ws,rowPole,31,'LN (Existing)');
         setCell(ws,rowPole,32,'Pole 7/250');
-        setCell(ws,rowPole,33,line);
+        setCell(ws,rowPole,33,finalLine);
         setCell(ws,rowPole,34,p.fat||'-');
 
         rowPole++;
@@ -220,7 +271,7 @@ async function generate(){
     XLSX.writeFile(outWB,'MASTER_POP_UP.xlsx');
   };
 
-  reader.readAsBinaryString(dbFile);
+  reader.readAsBinaryString(db);
 }
 </script>
 
