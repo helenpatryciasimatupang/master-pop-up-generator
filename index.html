@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<title>Master Pop Up Generator (FINAL)</title>
+<title>Master Pop Up Generator (FINAL – TEMPLATE)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -15,10 +15,12 @@ button { margin-top:10px; padding:10px 24px }
 </head>
 <body>
 
-<h2>Master Pop Up Generator (FINAL)</h2>
+<h2>Master Pop Up Generator (FINAL – TEMPLATE)</h2>
 
+<h3>Upload File</h3>
 <input type="file" id="dbFile" accept=".xlsx">
 <input type="file" id="kmzFile" accept=".kmz">
+<input type="file" id="templateFile" accept=".xlsx">
 
 <h3>Input Area</h3>
 <input id="area" placeholder="Nama Area">
@@ -47,58 +49,37 @@ function coordKey(lat,lon,d=6){
   return `${lat.toFixed(d)},${lon.toFixed(d)}`;
 }
 
-function setCell(ws,r,c,v){
-  ws[XLSX.utils.encode_cell({r,c})]={t:'s',v:String(v ?? '')};
-}
-
-// ================= LINE FILTER =================
 function filterOnlyLine(text){
   if(!text) return '';
-  const out=text.split(',')
+  return text.split(',')
     .map(s=>s.trim().toUpperCase())
-    .filter(s=>/^LINE\s+[A-Z0-9]+$/.test(s));
-  return out.join(',');
+    .filter(s=>/^LINE\s+[A-Z0-9]+$/.test(s))
+    .join(',');
 }
 
-// ================= HEADER =================
-const HEADERS=[
-'HOMEPASS_ID','CLUSTER_NAME','PREFIX_ADDRESS','STREET_NAME','HOUSE_NUMBER','BLOCK',
-'FLOOR','RT','RW','DISTRICT','SUB_DISTRICT','FDT_CODE','FAT_CODE',
-'BUILDING_LATITUDE','BUILDING_LONGITUDE','Category BizPass','POST CODE',
-'ADDRESS POLE / FAT','OV_UG','HOUSE_COMMENT_','BUILDING_NAME','TOWER','APTN',
-'FIBER_NODE__HFC_','ID_Area','Clamp_Hook_ID','DEPLOYMENT_TYPE','NEED_SURVEY',
-'Pole ID (New)','Coordinate (Lat) NEW','Coordinate (Long) NEW',
-'Pole Provider (New)','Pole Type','LINE','FAT ID/NETWORK ID',
-'Clamp_Hook_LATITUDE','Clamp_Hook_LONGITUDE'
-];
-
-function writeHeader(ws){
-  HEADERS.forEach((h,i)=>setCell(ws,0,i,h));
-  ws['!ref']='A1:AK5000';
+// ===== HEADER MAP (dari template) =====
+function getHeaderMap(ws){
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const map = {};
+  for(let c=range.s.c; c<=range.e.c; c++){
+    const cell = ws[XLSX.utils.encode_cell({r:0,c})];
+    if(cell?.v) map[cell.v.trim()] = c;
+  }
+  return map;
 }
 
-// ================= GEO =================
-const M_LAT=111320;
-const mLon=lat=>111320*Math.cos(lat*Math.PI/180);
-function distPointSeg(p,a,b){
-  const px=p.lon*mLon(p.lat), py=p.lat*M_LAT;
-  const ax=a.lon*mLon(a.lat), ay=a.lat*M_LAT;
-  const bx=b.lon*mLon(b.lat), by=b.lat*M_LAT;
-  const vx=bx-ax, vy=by-ay, wx=px-ax, wy=py-ay;
-  const c1=vx*wx+vy*wy;
-  if(c1<=0) return Math.hypot(px-ax,py-ay);
-  const c2=vx*vx+vy*vy;
-  if(c2<=c1) return Math.hypot(px-bx,py-by);
-  const t=c1/c2;
-  return Math.hypot(px-(ax+t*vx),py-(ay+t*vy));
+function setByHeader(ws,header,row,name,value){
+  const c = header[name];
+  if(c === undefined) return;
+  ws[XLSX.utils.encode_cell({r:row,c})] = { t:'s', v:String(value ?? '') };
 }
 
 // ================= KMZ =================
 async function parseKMZ(file){
-  const zip=await JSZip.loadAsync(file);
-  const kml=zip.file(/\.kml$/i)[0];
-  const txt=await kml.async('text');
-  const xml=new DOMParser().parseFromString(txt,'text/xml');
+  const zip = await JSZip.loadAsync(file);
+  const kml = zip.file(/\.kml$/i)[0];
+  const text = await kml.async('text');
+  const xml = new DOMParser().parseFromString(text,'text/xml');
   const segs=[];
   [...xml.getElementsByTagName('Placemark')].forEach(p=>{
     const name=p.getElementsByTagName('name')[0]?.textContent?.trim();
@@ -116,115 +97,131 @@ async function parseKMZ(file){
 // ================= MAIN =================
 async function generate(){
   const db=dbFile.files[0];
-  if(!db) return alert('Upload DATABASE');
+  const tpl=templateFile.files[0];
+  if(!db||!tpl) return alert('Upload DATABASE & TEMPLATE');
   const kmz=kmzFile.files[0];
 
   const A={area:area.value,district:district.value,subdistrict:subdistrict.value,postcode:postcode.value,fdt:fdt.value,idarea:idarea.value};
 
-  const fr=new FileReader();
-  fr.onload=async e=>{
-    const wb=XLSX.read(e.target.result,{type:'binary'});
-    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-    const ws={}; writeHeader(ws);
+  const dbReader=new FileReader();
+  const tplReader=new FileReader();
 
-    let rHome=1, rPole=1;
+  dbReader.onload=async e1=>{
+    const dbWB=XLSX.read(e1.target.result,{type:'binary'});
+    const rows=XLSX.utils.sheet_to_json(dbWB.Sheets[dbWB.SheetNames[0]]);
 
-    // HOOK MAP
-    const hookMap={};
-    rows.forEach(r=>{
-      if(String(r.FolderPath||'').toUpperCase().includes('/HOOK'))
-        hookMap[normalize(r.Name)]=getLatLon(r.X,r.Y);
-    });
+    tplReader.onload=async e2=>{
+      const tplWB=XLSX.read(e2.target.result,{type:'binary'});
+      const ws=tplWB.Sheets['MASTER_POP_UP'];
+      if(!ws) return alert('Sheet MASTER_POP_UP tidak ditemukan');
 
-    // NETWORK BY COORD (FAT/FDT)
-    const netByCoord={};
-    rows.forEach(r=>{
-      const fp=String(r.FolderPath||'').toUpperCase();
-      if(!fp.includes('/FAT')&&!fp.includes('/FDT')) return;
-      const c=getLatLon(r.X,r.Y);
-      const k=coordKey(c.lat,c.lon);
-      if(!k) return;
-      netByCoord[k]=r.Name;
-    });
+      const H=getHeaderMap(ws);
+      let rowHome=1, rowPole=1;
 
-    const segs=kmz?await parseKMZ(kmz):[];
-    const TOL=1.5;
-
-    // ===== HOME =====
-    rows.forEach(r=>{
-      const fp=String(r.FolderPath||'');
-      if(!fp.includes('/HOME')&&!fp.includes('/HOME-BIZ')) return;
-
-      const raw=String(r.Name||'').trim();
-      let block='-', house=raw;
-      const m=raw.match(/^([A-Za-z])(\d+)$/);
-      if(m){ block=m[1]; house=m[2].padStart(2,'0'); }
-
-      const c=getLatLon(r.X,r.Y);
-      const h=hookMap[normalize(r.CLAIM_HOOK)]||{lat:'',lon:''};
-
-      setCell(ws,rHome,0,'-');
-      setCell(ws,rHome,1,A.area);
-      setCell(ws,rHome,2,'JL.');
-      setCell(ws,rHome,3,r.JALAN||'-');
-      setCell(ws,rHome,4,house);
-      setCell(ws,rHome,5,block);
-      setCell(ws,rHome,6,'-'); setCell(ws,rHome,7,'-'); setCell(ws,rHome,8,'-');
-      setCell(ws,rHome,9,A.district);
-      setCell(ws,rHome,10,A.subdistrict);
-      setCell(ws,rHome,11,A.fdt);
-      setCell(ws,rHome,12,r.FAT||'-');
-      setCell(ws,rHome,13,c.lat);
-      setCell(ws,rHome,14,c.lon);
-      setCell(ws,rHome,15,'');
-      setCell(ws,rHome,16,A.postcode);
-      setCell(ws,rHome,17,'-');
-      setCell(ws,rHome,18,'O');
-      setCell(ws,rHome,19,'NEED SURVEY');
-      setCell(ws,rHome,20,'-'); setCell(ws,rHome,21,'-'); setCell(ws,rHome,22,'-'); setCell(ws,rHome,23,'-');
-      setCell(ws,rHome,24,A.idarea);
-      setCell(ws,rHome,25,r.CLAIM_HOOK||'-');
-      setCell(ws,rHome,26,'FAT EXT');
-      setCell(ws,rHome,27,'YES');
-      setCell(ws,rHome,35,h.lat);
-      setCell(ws,rHome,36,h.lon);
-      rHome++;
-    });
-
-    // ===== POLE =====
-    const poleMap={};
-    rows.forEach(r=>{
-      if(String(r.FolderPath||'').toUpperCase().includes('/POLE')){
-        if(!poleMap[r.Name]) poleMap[r.Name]={name:r.Name,coord:getLatLon(r.X,r.Y)};
-      }
-    });
-
-    Object.values(poleMap)
-      .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))
-      .forEach(p=>{
-        let found=new Set();
-        segs.forEach(s=>{
-          if(distPointSeg(p.coord,s.a,s.b)<=TOL) found.add(s.name);
-        });
-        const line=filterOnlyLine([...found].join(','));
-        const k=coordKey(p.coord.lat,p.coord.lon);
-        const net=k&&netByCoord[k]?netByCoord[k]:'-';
-
-        setCell(ws,rPole,28,p.name);
-        setCell(ws,rPole,29,p.coord.lat);
-        setCell(ws,rPole,30,p.coord.lon);
-        setCell(ws,rPole,31,'LN (Existing)');
-        setCell(ws,rPole,32,'Pole 7/250');
-        setCell(ws,rPole,33,line);
-        setCell(ws,rPole,34,net);
-        rPole++;
+      // ===== HOOK MAP =====
+      const hookMap={};
+      rows.forEach(r=>{
+        if(String(r.FolderPath||'').toUpperCase().includes('/HOOK'))
+          hookMap[normalize(r.Name)]=getLatLon(r.X,r.Y);
       });
 
-    const out=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(out,ws,'MASTER_POP_UP');
-    XLSX.writeFile(out,'MASTER_POP_UP.xlsx');
+      // ===== FAT/FDT by coord =====
+      const netByCoord={};
+      rows.forEach(r=>{
+        const fp=String(r.FolderPath||'').toUpperCase();
+        if(!fp.includes('/FAT')&&!fp.includes('/FDT')) return;
+        const c=getLatLon(r.X,r.Y);
+        const k=coordKey(c.lat,c.lon);
+        if(k) netByCoord[k]=r.Name;
+      });
+
+      const segs=kmz?await parseKMZ(kmz):[];
+      const TOL=1.5;
+
+      // ===== HOME =====
+      rows.forEach(r=>{
+        const fp=String(r.FolderPath||'');
+        if(!fp.includes('/HOME')&&!fp.includes('/HOME-BIZ')) return;
+
+        const raw=String(r.Name||'').trim();
+        let block='-', house=raw;
+        const m=raw.match(/^([A-Za-z])(\d+)$/);
+        if(m){ block=m[1]; house=m[2].padStart(2,'0'); }
+
+        const c=getLatLon(r.X,r.Y);
+        const h=hookMap[normalize(r.CLAIM_HOOK)]||{lat:'',lon:''};
+
+        setByHeader(ws,H,rowHome,'HOMEPASS_ID','-');
+        setByHeader(ws,H,rowHome,'CLUSTER_NAME',A.area);
+        setByHeader(ws,H,rowHome,'PREFIX_ADDRESS','JL.');
+        setByHeader(ws,H,rowHome,'STREET_NAME',r.JALAN||'-');
+        setByHeader(ws,H,rowHome,'HOUSE_NUMBER',house);
+        setByHeader(ws,H,rowHome,'BLOCK',block);
+        setByHeader(ws,H,rowHome,'FLOOR','-');
+        setByHeader(ws,H,rowHome,'RT','-');
+        setByHeader(ws,H,rowHome,'RW','-');
+        setByHeader(ws,H,rowHome,'DISTRICT',A.district);
+        setByHeader(ws,H,rowHome,'SUB_DISTRICT',A.subdistrict);
+        setByHeader(ws,H,rowHome,'FDT_CODE',A.fdt);
+        setByHeader(ws,H,rowHome,'FAT_CODE',r.FAT||'-');
+        setByHeader(ws,H,rowHome,'BUILDING_LATITUDE',c.lat);
+        setByHeader(ws,H,rowHome,'BUILDING_LONGITUDE',c.lon);
+        setByHeader(ws,H,rowHome,'POST CODE',A.postcode);
+        setByHeader(ws,H,rowHome,'ADDRESS POLE / FAT','-');
+        setByHeader(ws,H,rowHome,'OV_UG','O');
+        setByHeader(ws,H,rowHome,'HOUSE_COMMENT_','NEED SURVEY');
+        setByHeader(ws,H,rowHome,'BUILDING_NAME','-');
+        setByHeader(ws,H,rowHome,'TOWER','-');
+        setByHeader(ws,H,rowHome,'APTN','-');
+        setByHeader(ws,H,rowHome,'FIBER_NODE__HFC_','-');
+        setByHeader(ws,H,rowHome,'ID_Area',A.idarea);
+        setByHeader(ws,H,rowHome,'Clamp_Hook_ID',r.CLAIM_HOOK||'-');
+        setByHeader(ws,H,rowHome,'DEPLOYMENT_TYPE','FAT EXT');
+        setByHeader(ws,H,rowHome,'NEED_SURVEY','YES');
+        setByHeader(ws,H,rowHome,'Clamp_Hook_LATITUDE',h.lat);
+        setByHeader(ws,H,rowHome,'Clamp_Hook_LONGITUDE',h.lon);
+
+        rowHome++;
+      });
+
+      // ===== POLE =====
+      const poleMap={};
+      rows.forEach(r=>{
+        if(String(r.FolderPath||'').toUpperCase().includes('/POLE')){
+          if(!poleMap[r.Name]) poleMap[r.Name]={name:r.Name,coord:getLatLon(r.X,r.Y)};
+        }
+      });
+
+      Object.values(poleMap)
+        .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))
+        .forEach(p=>{
+          let found=new Set();
+          segs.forEach(s=>{
+            if(Math.hypot(p.coord.lat-s.a.lat,p.coord.lon-s.a.lon)<=0.00002) found.add(s.name);
+          });
+
+          const line=filterOnlyLine([...found].join(','));
+          const k=coordKey(p.coord.lat,p.coord.lon);
+          const net=k&&netByCoord[k]?netByCoord[k]:'-';
+
+          setByHeader(ws,H,rowPole,'Pole ID (New)',p.name);
+          setByHeader(ws,H,rowPole,'Coordinate (Lat) NEW',p.coord.lat);
+          setByHeader(ws,H,rowPole,'Coordinate (Long) NEW',p.coord.lon);
+          setByHeader(ws,H,rowPole,'Pole Provider (New)','LN (Existing)');
+          setByHeader(ws,H,rowPole,'Pole Type','Pole 7/250');
+          setByHeader(ws,H,rowPole,'LINE',line);
+          setByHeader(ws,H,rowPole,'FAT ID/NETWORK ID',net);
+
+          rowPole++;
+        });
+
+      XLSX.writeFile(tplWB,'MASTER_POP_UP_RESULT.xlsx');
+    };
+
+    tplReader.readAsBinaryString(tpl);
   };
-  fr.readAsBinaryString(db);
+
+  dbReader.readAsBinaryString(db);
 }
 </script>
 
