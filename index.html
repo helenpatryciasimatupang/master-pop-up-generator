@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Master Pop Up Generator (FINAL CLEAN LINE)</title>
+  <title>Master Pop Up Generator (FINAL • LINE CLEAN)</title>
 
   <!-- XLSX -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
@@ -17,7 +17,7 @@
 </head>
 <body>
 
-<h2>Master Pop Up Generator (FINAL • LINE ONLY)</h2>
+<h2>Master Pop Up Generator (FINAL • LINE ONLY, EMPTY OK)</h2>
 
 <h3>Upload File</h3>
 <input type="file" id="dbFile" accept=".xlsx">
@@ -39,23 +39,23 @@ const normalize = v => String(v ?? '').trim().toUpperCase();
 
 function getLatLon(x,y){
   const X = Number(x), Y = Number(y);
-  if (!isFinite(X) || !isFinite(Y)) return {lat:'-',lon:'-'};
+  if (!isFinite(X) || !isFinite(Y)) return {lat:'',lon:''};
   if (Math.abs(X)<=90 && Math.abs(Y)>90) return {lat:X,lon:Y};
   if (Math.abs(Y)<=90 && Math.abs(X)>90) return {lat:Y,lon:X};
   return {lat:X,lon:Y};
 }
 
 function setCell(ws,r,c,v){
-  ws[XLSX.utils.encode_cell({r,c})] = { t:'s', v:String(v ?? '-') };
+  ws[XLSX.utils.encode_cell({r,c})] = { t:'s', v: String(v ?? '') };
 }
 
-// 🔥 FILTER HANYA "LINE X"
+// 🔥 FILTER: HANYA "LINE X", KOSONG JIKA TIDAK ADA
 function filterOnlyLine(text){
-  if(!text || text==='-') return '-';
+  if(!text) return '';
   const out = text.split(',')
     .map(s=>s.trim().toUpperCase())
     .filter(s=>/^LINE\s+[A-Z0-9]+$/.test(s));
-  return out.length ? out.join(',') : '-';
+  return out.length ? out.join(',') : '';
 }
 
 // ================= HEADER =================
@@ -75,7 +75,7 @@ function writeHeader(ws){
   ws['!ref'] = 'A1:AK5000';
 }
 
-// ================= GEO =================
+// ================= GEO (SEGMENT DISTANCE) =================
 const M_PER_DEG_LAT = 111320;
 function metersPerDegLon(lat){ return 111320 * Math.cos(lat * Math.PI / 180); }
 
@@ -98,14 +98,14 @@ function distPointToSegMeters(p,a,b){
   return Math.hypot(px-(ax+t*vx),py-(ay+t*vy));
 }
 
-// ================= KMZ PARSER (SEGMENT) =================
+// ================= KMZ PARSER (SEGMENT-BASED) =================
 async function parseKMZSegments(file){
   const zip = await JSZip.loadAsync(file);
   const kml = zip.file(/\.kml$/i)[0];
   const text = await kml.async("text");
   const xml = new DOMParser().parseFromString(text,"text/xml");
 
-  const lines=[];
+  const segments=[];
   [...xml.getElementsByTagName("Placemark")].forEach(pm=>{
     const name = pm.getElementsByTagName("name")[0]?.textContent?.trim();
     const coords = pm.getElementsByTagName("coordinates")[0]?.textContent;
@@ -117,10 +117,10 @@ async function parseKMZSegments(file){
     }).filter(Boolean);
 
     for(let i=0;i<pts.length-1;i++){
-      lines.push({name, a:pts[i], b:pts[i+1]});
+      segments.push({name, a:pts[i], b:pts[i+1]});
     }
   });
-  return lines;
+  return segments;
 }
 
 // ================= MAIN =================
@@ -156,52 +156,52 @@ async function generate(){
       }
     });
 
-    // FAT → LINE fallback
+    // FAT → LINE fallback (akan difilter)
     const fatLineMap={};
     rows.forEach(r=>{
       if(!r.FAT) return;
-      if(r.FAT.includes('A')) fatLineMap[r.FAT]='LINE A';
-      if(r.FAT.includes('B')) fatLineMap[r.FAT]='LINE B';
-      if(r.FAT.includes('C')) fatLineMap[r.FAT]='LINE C';
-      if(r.FAT.includes('D')) fatLineMap[r.FAT]='LINE D';
+      if(String(r.FAT).includes('A')) fatLineMap[r.FAT]='LINE A';
+      if(String(r.FAT).includes('B')) fatLineMap[r.FAT]='LINE B';
+      if(String(r.FAT).includes('C')) fatLineMap[r.FAT]='LINE C';
+      if(String(r.FAT).includes('D')) fatLineMap[r.FAT]='LINE D';
     });
 
     // KMZ segments
     const kmzSegs = kmz ? await parseKMZSegments(kmz) : [];
-    const TOL=1.5;
+    const TOL=1.5; // meter
 
-    // HOME
+    // ===== HOME =====
     rows.forEach(r=>{
       const fp=String(r.FolderPath||'');
       if(!fp.includes('/HOME')&&!fp.includes('/HOME-BIZ')) return;
 
-      const house=r.Name||'-';
-      const block=/^[A-Za-z]\d+/.test(house)?house[0]:'-';
+      const house=r.Name||'';
+      const block=/^[A-Za-z]\d+/.test(house)?house[0]:'';
       const hc=getLatLon(r.X,r.Y);
-      const hookC=hookMap[normalize(r.CLAIM_HOOK)]||{lat:'-',lon:'-'};
+      const hookC=hookMap[normalize(r.CLAIM_HOOK)]||{lat:'',lon:''};
 
-      setCell(ws,rowHome,0,'-');
+      setCell(ws,rowHome,0,'');
       setCell(ws,rowHome,1,A.area);
       setCell(ws,rowHome,2,'JL.');
-      setCell(ws,rowHome,3,r.JALAN||'-');
+      setCell(ws,rowHome,3,r.JALAN||'');
       setCell(ws,rowHome,4,house);
       setCell(ws,rowHome,5,block);
-      setCell(ws,rowHome,6,'-'); setCell(ws,rowHome,7,'-'); setCell(ws,rowHome,8,'-');
+      setCell(ws,rowHome,6,''); setCell(ws,rowHome,7,''); setCell(ws,rowHome,8,'');
       setCell(ws,rowHome,9,A.district);
       setCell(ws,rowHome,10,A.subdistrict);
       setCell(ws,rowHome,11,A.fdt);
-      setCell(ws,rowHome,12,r.FAT||'-');
+      setCell(ws,rowHome,12,r.FAT||'');
       setCell(ws,rowHome,13,hc.lat);
       setCell(ws,rowHome,14,hc.lon);
       setCell(ws,rowHome,15,'');
       setCell(ws,rowHome,16,A.postcode);
-      setCell(ws,rowHome,17,'-');
+      setCell(ws,rowHome,17,'');
       setCell(ws,rowHome,18,'O');
       setCell(ws,rowHome,19,'NEED SURVEY');
-      setCell(ws,rowHome,20,'-'); setCell(ws,rowHome,21,'-'); setCell(ws,rowHome,22,'-');
-      setCell(ws,rowHome,23,'-');
+      setCell(ws,rowHome,20,''); setCell(ws,rowHome,21,''); setCell(ws,rowHome,22,'');
+      setCell(ws,rowHome,23,'');
       setCell(ws,rowHome,24,A.idarea);
-      setCell(ws,rowHome,25,r.CLAIM_HOOK||'-');
+      setCell(ws,rowHome,25,r.CLAIM_HOOK||'');
       setCell(ws,rowHome,26,'FAT EXT');
       setCell(ws,rowHome,27,'YES');
       setCell(ws,rowHome,35,hookC.lat);
@@ -210,13 +210,13 @@ async function generate(){
       rowHome++;
     });
 
-    // POLE
+    // ===== POLE =====
     const poleMap={};
     rows.forEach(r=>{
       if(String(r.FolderPath||'').toUpperCase().includes('/POLE')){
         const k=normalize(r.Name);
         if(!poleMap[k]){
-          poleMap[k]={name:r.Name,coord:getLatLon(r.X,r.Y),fat:r.FAT||'-'};
+          poleMap[k]={name:r.Name,coord:getLatLon(r.X,r.Y),fat:r.FAT||''};
         }
       }
     });
@@ -233,7 +233,7 @@ async function generate(){
           });
         }
 
-        let raw = found.size ? [...found].join(',') : (fatLineMap[p.fat]||'-');
+        const raw = found.size ? [...found].join(',') : (fatLineMap[p.fat]||'');
         const finalLine = filterOnlyLine(raw);
 
         setCell(ws,rowPole,28,p.name);
@@ -241,8 +241,8 @@ async function generate(){
         setCell(ws,rowPole,30,p.coord.lon);
         setCell(ws,rowPole,31,'LN (Existing)');
         setCell(ws,rowPole,32,'Pole 7/250');
-        setCell(ws,rowPole,33,finalLine);
-        setCell(ws,rowPole,34,p.fat||'-');
+        setCell(ws,rowPole,33,finalLine); // LINE (kosong jika tidak ada)
+        setCell(ws,rowPole,34,p.fat||'');
 
         rowPole++;
       });
