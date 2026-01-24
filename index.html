@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<title>Master Pop Up Generator (FINAL – TEMPLATE SAFE)</title>
+<title>Master Pop Up Generator (FINAL)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -17,6 +17,7 @@ button { margin-top:10px; padding:10px 24px }
 
 <h2>Master Pop Up Generator (FINAL)</h2>
 
+<h3>Upload File</h3>
 <input type="file" id="dbFile" accept=".xlsx">
 <input type="file" id="kmzFile" accept=".kmz">
 <input type="file" id="tplFile" accept=".xlsx">
@@ -32,6 +33,7 @@ button { margin-top:10px; padding:10px 24px }
 <button onclick="generate()">Generate Master Pop Up</button>
 
 <script>
+// ================= UTIL =================
 const normalize = v => String(v ?? '').trim().toUpperCase();
 
 function getLatLon(x,y){
@@ -42,82 +44,165 @@ function getLatLon(x,y){
   return {lat:X,lon:Y};
 }
 
-function set(ws,r,c,v){
-  ws[XLSX.utils.encode_cell({r,c})] = { t:'s', v:String(v ?? '') };
+function coordKey(lat,lon,d=6){
+  if(!isFinite(lat)||!isFinite(lon)) return '';
+  return `${lat.toFixed(d)},${lon.toFixed(d)}`;
 }
 
+function setCell(ws,r,c,v){
+  ws[XLSX.utils.encode_cell({r,c})]={t:'s',v:String(v ?? '')};
+}
+
+// ===== LINE FILTER (HANYA LINE) =====
+function filterOnlyLine(text){
+  if(!text) return '';
+  return text.split(',')
+    .map(s=>s.trim().toUpperCase())
+    .filter(s=>/^LINE\s+[A-Z0-9]+$/.test(s))
+    .join(',');
+}
+
+// ================= GEO =================
+const M_LAT=111320;
+const mLon=lat=>111320*Math.cos(lat*Math.PI/180);
+function distPointSeg(p,a,b){
+  const px=p.lon*mLon(p.lat), py=p.lat*M_LAT;
+  const ax=a.lon*mLon(a.lat), ay=a.lat*M_LAT;
+  const bx=b.lon*mLon(b.lat), by=b.lat*M_LAT;
+  const vx=bx-ax, vy=by-ay, wx=px-ax, wy=py-ay;
+  const c1=vx*wx+vy*wy;
+  if(c1<=0) return Math.hypot(px-ax,py-ay);
+  const c2=vx*vx+vy*vy;
+  if(c2<=c1) return Math.hypot(px-bx,py-by);
+  const t=c1/c2;
+  return Math.hypot(px-(ax+t*vx),py-(ay+t*vy));
+}
+
+// ================= KMZ =================
+async function parseKMZ(file){
+  const zip=await JSZip.loadAsync(file);
+  const kml=zip.file(/\.kml$/i)[0];
+  const txt=await kml.async('text');
+  const xml=new DOMParser().parseFromString(txt,'text/xml');
+  const segs=[];
+  [...xml.getElementsByTagName('Placemark')].forEach(p=>{
+    const name=p.getElementsByTagName('name')[0]?.textContent?.trim();
+    const c=p.getElementsByTagName('coordinates')[0]?.textContent;
+    if(!name||!c) return;
+    const pts=c.trim().split(/\s+/).map(s=>{
+      const [lon,lat]=s.split(',').map(Number);
+      return isFinite(lat)&&isFinite(lon)?{lat,lon}:null;
+    }).filter(Boolean);
+    for(let i=0;i<pts.length-1;i++) segs.push({name,a:pts[i],b:pts[i+1]});
+  });
+  return segs;
+}
+
+// ================= MAIN =================
 async function generate(){
   const db=dbFile.files[0];
   const tpl=tplFile.files[0];
   if(!db||!tpl) return alert('Upload DATABASE & TEMPLATE');
+  const kmz=kmzFile.files[0];
 
-  const A={
-    area:area.value,
-    district:district.value,
-    subdistrict:subdistrict.value,
-    postcode:postcode.value,
-    fdt:fdt.value,
-    idarea:idarea.value
-  };
+  const A={area:area.value,district:district.value,subdistrict:subdistrict.value,postcode:postcode.value,fdt:fdt.value,idarea:idarea.value};
 
-  const dbWB = XLSX.read(await db.arrayBuffer());
-  const rows = XLSX.utils.sheet_to_json(dbWB.Sheets[dbWB.SheetNames[0]]);
+  const dbBuf=await db.arrayBuffer();
+  const tplBuf=await tpl.arrayBuffer();
 
-  const tplWB = XLSX.read(await tpl.arrayBuffer());
-  const ws = tplWB.Sheets['MASTER_POP_UP'];
-  if(!ws) return alert('Sheet MASTER_POP_UP tidak ditemukan');
+  const dbWB=XLSX.read(dbBuf,{type:'array'});
+  const tplWB=XLSX.read(tplBuf,{type:'array'});
 
-  let r = 1; // ROW 2
+  // ===== PAKAI SHEET TEMPLATE: "Master Data" =====
+  const sheetName='Master Data';
+  if(!tplWB.Sheets[sheetName]) return alert('Sheet "Master Data" tidak ditemukan');
 
-  // HOOK MAP
+  const ws=tplWB.Sheets[sheetName];
+  const rows=XLSX.utils.sheet_to_json(dbWB.Sheets[dbWB.SheetNames[0]]);
+
+  let rHome=1, rPole=1;
+
+  // ===== HOOK MAP =====
   const hookMap={};
-  rows.forEach(x=>{
-    if(String(x.FolderPath||'').toUpperCase().includes('/HOOK'))
-      hookMap[normalize(x.Name)] = getLatLon(x.X,x.Y);
+  rows.forEach(r=>{
+    if(String(r.FolderPath||'').toUpperCase().includes('/HOOK'))
+      hookMap[normalize(r.Name)]=getLatLon(r.X,r.Y);
   });
 
-  // HOME
-  rows.forEach(x=>{
-    const fp=String(x.FolderPath||'');
+  // ===== FAT/FDT BY COORD =====
+  const netByCoord={};
+  rows.forEach(r=>{
+    const fp=String(r.FolderPath||'').toUpperCase();
+    if(!fp.includes('/FAT')&&!fp.includes('/FDT')) return;
+    const c=getLatLon(r.X,r.Y);
+    const k=coordKey(c.lat,c.lon);
+    if(k) netByCoord[k]=r.Name;
+  });
+
+  const segs=kmz?await parseKMZ(kmz):[];
+  const TOL=1.5;
+
+  // ===== HOME =====
+  rows.forEach(r=>{
+    const fp=String(r.FolderPath||'');
     if(!fp.includes('/HOME')&&!fp.includes('/HOME-BIZ')) return;
 
-    let raw=String(x.Name||'');
+    const raw=String(r.Name||'').trim();
     let block='-', house=raw;
     const m=raw.match(/^([A-Za-z])(\d+)$/);
     if(m){ block=m[1]; house=m[2].padStart(2,'0'); }
 
-    const c=getLatLon(x.X,x.Y);
-    const h=hookMap[normalize(x.CLAIM_HOOK)]||{lat:'',lon:''};
+    const c=getLatLon(r.X,r.Y);
+    const h=hookMap[normalize(r.CLAIM_HOOK)]||{lat:'',lon:''};
 
-    set(ws,r,1,'-');              // HOMEPASS_ID
-    set(ws,r,2,A.area);
-    set(ws,r,3,'JL.');
-    set(ws,r,4,x.JALAN||'');
-    set(ws,r,5,house);
-    set(ws,r,6,block);
-    set(ws,r,7,'-');
-    set(ws,r,8,'-');
-    set(ws,r,9,'-');
-    set(ws,r,10,A.district);
-    set(ws,r,11,A.subdistrict);
-    set(ws,r,12,A.fdt);
-    set(ws,r,13,x.FAT||'-');
-    set(ws,r,14,c.lat);
-    set(ws,r,15,c.lon);
-    set(ws,r,18,'-');
-    set(ws,r,19,'O');
-    set(ws,r,20,'NEED SURVEY');
-    set(ws,r,24,A.idarea);
-    set(ws,r,25,x.CLAIM_HOOK||'-');
-    set(ws,r,26,'FAT EXT');
-    set(ws,r,27,'YES');
-    set(ws,r,35,h.lat);
-    set(ws,r,36,h.lon);
+    const set=(col,val)=>setCell(ws,rHome,col,val);
 
-    r++;
+    set(1,'-'); set(2,A.area); set(3,'JL.'); set(4,r.JALAN||'-');
+    set(5,house); set(6,block);
+    [7,8,9].forEach(i=>set(i,'-'));
+    set(10,A.district); set(11,A.subdistrict); set(12,A.fdt);
+    set(13,r.FAT||'-'); set(14,c.lat); set(15,c.lon);
+    set(16,''); set(17,A.postcode); set(18,'-'); set(19,'O');
+    set(20,'NEED SURVEY');
+    [21,22,23,24].forEach(i=>set(i,'-'));
+    set(25,A.idarea); set(26,r.CLAIM_HOOK||'-');
+    set(27,'FAT EXT'); set(28,'YES');
+    set(36,h.lat); set(37,h.lon);
+
+    rHome++;
   });
 
-  XLSX.writeFile(tplWB,'MASTER_POP_UP_RESULT.xlsx');
+  // ===== POLE =====
+  const poleMap={};
+  rows.forEach(r=>{
+    if(String(r.FolderPath||'').toUpperCase().includes('/POLE'))
+      if(!poleMap[r.Name]) poleMap[r.Name]={name:r.Name,coord:getLatLon(r.X,r.Y)};
+  });
+
+  Object.values(poleMap)
+    .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))
+    .forEach(p=>{
+      let found=[];
+      segs.forEach(s=>{
+        if(distPointSeg(p.coord,s.a,s.b)<=TOL) found.push(s.name);
+      });
+
+      const line=filterOnlyLine(found.join(','));
+      const k=coordKey(p.coord.lat,p.coord.lon);
+      const net=netByCoord[k]||'-';
+
+      setCell(ws,rPole,29,p.name);
+      setCell(ws,rPole,30,p.coord.lat);
+      setCell(ws,rPole,31,p.coord.lon);
+      setCell(ws,rPole,32,'LN (Existing)');
+      setCell(ws,rPole,33,'Pole 7/250');
+      setCell(ws,rPole,34,line);
+      setCell(ws,rPole,35,net);
+
+      rPole++;
+    });
+
+  XLSX.writeFile(tplWB,'MASTER_POP_UP.xlsx');
 }
 </script>
 
