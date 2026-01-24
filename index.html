@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<title>Master Pop Up Generator (FINAL)</title>
+<title>Master Pop Up Generator (FINAL – TEMPLATE SAFE)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -17,10 +17,9 @@ button { margin-top:10px; padding:10px 24px }
 
 <h2>Master Pop Up Generator (FINAL)</h2>
 
-<h3>Upload File</h3>
 <input type="file" id="dbFile" accept=".xlsx">
 <input type="file" id="kmzFile" accept=".kmz">
-<input type="file" id="templateFile" accept=".xlsx">
+<input type="file" id="tplFile" accept=".xlsx">
 
 <h3>Input Area</h3>
 <input id="area" placeholder="Nama Area">
@@ -33,7 +32,6 @@ button { margin-top:10px; padding:10px 24px }
 <button onclick="generate()">Generate Master Pop Up</button>
 
 <script>
-// ================= UTIL =================
 const normalize = v => String(v ?? '').trim().toUpperCase();
 
 function getLatLon(x,y){
@@ -44,187 +42,82 @@ function getLatLon(x,y){
   return {lat:X,lon:Y};
 }
 
-function coordKey(lat,lon,d=6){
-  if(!isFinite(lat)||!isFinite(lon)) return '';
-  return `${lat.toFixed(d)},${lon.toFixed(d)}`;
+function set(ws,r,c,v){
+  ws[XLSX.utils.encode_cell({r,c})] = { t:'s', v:String(v ?? '') };
 }
 
-function filterOnlyLine(text){
-  if(!text) return '';
-  return text.split(',')
-    .map(s=>s.trim().toUpperCase())
-    .filter(s=>/^LINE\s+[A-Z0-9]+$/.test(s))
-    .join(',');
-}
-
-function getHeaderMap(ws){
-  const range = XLSX.utils.decode_range(ws['!ref']);
-  const map = {};
-  for(let c=range.s.c; c<=range.e.c; c++){
-    const cell = ws[XLSX.utils.encode_cell({r:0,c})];
-    if(cell?.v) map[cell.v.trim()] = c;
-  }
-  return map;
-}
-
-function setByHeader(ws,header,row,name,value){
-  const c = header[name];
-  if(c === undefined) return;
-  ws[XLSX.utils.encode_cell({r:row,c})] = { t:'s', v:String(value ?? '') };
-}
-
-// ================= KMZ =================
-async function parseKMZ(file){
-  const zip = await JSZip.loadAsync(file);
-  const kml = zip.file(/\.kml$/i)[0];
-  const text = await kml.async('text');
-  const xml = new DOMParser().parseFromString(text,'text/xml');
-  const segs=[];
-  [...xml.getElementsByTagName('Placemark')].forEach(p=>{
-    const name=p.getElementsByTagName('name')[0]?.textContent?.trim();
-    const c=p.getElementsByTagName('coordinates')[0]?.textContent;
-    if(!name||!c) return;
-    const pts=c.trim().split(/\s+/).map(s=>{
-      const [lon,lat]=s.split(',').map(Number);
-      return isFinite(lat)&&isFinite(lon)?{lat,lon}:null;
-    }).filter(Boolean);
-    for(let i=0;i<pts.length-1;i++) segs.push({name,a:pts[i],b:pts[i+1]});
-  });
-  return segs;
-}
-
-// ================= MAIN =================
 async function generate(){
   const db=dbFile.files[0];
-  const tpl=templateFile.files[0];
+  const tpl=tplFile.files[0];
   if(!db||!tpl) return alert('Upload DATABASE & TEMPLATE');
-  const kmz=kmzFile.files[0];
 
-  const A={area:area.value,district:district.value,subdistrict:subdistrict.value,postcode:postcode.value,fdt:fdt.value,idarea:idarea.value};
-
-  const dbReader=new FileReader();
-  const tplReader=new FileReader();
-
-  dbReader.onload=async e1=>{
-    const dbWB=XLSX.read(e1.target.result,{type:'binary'});
-    const rows=XLSX.utils.sheet_to_json(dbWB.Sheets[dbWB.SheetNames[0]]);
-
-    tplReader.onload=async e2=>{
-      const tplWB=XLSX.read(e2.target.result,{type:'binary'});
-
-      // 🔥 FIX UTAMA: ambil sheet pertama (APAPUN NAMANYA)
-      const sheetName = tplWB.SheetNames[0];
-      const ws = tplWB.Sheets[sheetName];
-      if(!ws) return alert('Sheet template kosong');
-
-      const H=getHeaderMap(ws);
-      let rowHome=1, rowPole=1;
-
-      // ===== HOOK MAP =====
-      const hookMap={};
-      rows.forEach(r=>{
-        if(String(r.FolderPath||'').toUpperCase().includes('/HOOK'))
-          hookMap[normalize(r.Name)]=getLatLon(r.X,r.Y);
-      });
-
-      // ===== FAT/FDT by coord =====
-      const netByCoord={};
-      rows.forEach(r=>{
-        const fp=String(r.FolderPath||'').toUpperCase();
-        if(!fp.includes('/FAT')&&!fp.includes('/FDT')) return;
-        const c=getLatLon(r.X,r.Y);
-        const k=coordKey(c.lat,c.lon);
-        if(k) netByCoord[k]=r.Name;
-      });
-
-      const segs=kmz?await parseKMZ(kmz):[];
-      const TOL=1.5;
-
-      // ===== HOME =====
-      rows.forEach(r=>{
-        const fp=String(r.FolderPath||'');
-        if(!fp.includes('/HOME')&&!fp.includes('/HOME-BIZ')) return;
-
-        const raw=String(r.Name||'').trim();
-        let block='-', house=raw;
-        const m=raw.match(/^([A-Za-z])(\d+)$/);
-        if(m){ block=m[1]; house=m[2].padStart(2,'0'); }
-
-        const c=getLatLon(r.X,r.Y);
-        const h=hookMap[normalize(r.CLAIM_HOOK)]||{lat:'',lon:''};
-
-        setByHeader(ws,H,rowHome,'HOMEPASS_ID','-');
-        setByHeader(ws,H,rowHome,'CLUSTER_NAME',A.area);
-        setByHeader(ws,H,rowHome,'PREFIX_ADDRESS','JL.');
-        setByHeader(ws,H,rowHome,'STREET_NAME',r.JALAN||'-');
-        setByHeader(ws,H,rowHome,'HOUSE_NUMBER',house);
-        setByHeader(ws,H,rowHome,'BLOCK',block);
-        setByHeader(ws,H,rowHome,'FLOOR','-');
-        setByHeader(ws,H,rowHome,'RT','-');
-        setByHeader(ws,H,rowHome,'RW','-');
-        setByHeader(ws,H,rowHome,'DISTRICT',A.district);
-        setByHeader(ws,H,rowHome,'SUB_DISTRICT',A.subdistrict);
-        setByHeader(ws,H,rowHome,'FDT_CODE',A.fdt);
-        setByHeader(ws,H,rowHome,'FAT_CODE',r.FAT||'-');
-        setByHeader(ws,H,rowHome,'BUILDING_LATITUDE',c.lat);
-        setByHeader(ws,H,rowHome,'BUILDING_LONGITUDE',c.lon);
-        setByHeader(ws,H,rowHome,'POST CODE',A.postcode);
-        setByHeader(ws,H,rowHome,'ADDRESS POLE / FAT','-');
-        setByHeader(ws,H,rowHome,'OV_UG','O');
-        setByHeader(ws,H,rowHome,'HOUSE_COMMENT_','NEED SURVEY');
-        setByHeader(ws,H,rowHome,'BUILDING_NAME','-');
-        setByHeader(ws,H,rowHome,'TOWER','-');
-        setByHeader(ws,H,rowHome,'APTN','-');
-        setByHeader(ws,H,rowHome,'FIBER_NODE__HFC_','-');
-        setByHeader(ws,H,rowHome,'ID_Area',A.idarea);
-        setByHeader(ws,H,rowHome,'Clamp_Hook_ID',r.CLAIM_HOOK||'-');
-        setByHeader(ws,H,rowHome,'DEPLOYMENT_TYPE','FAT EXT');
-        setByHeader(ws,H,rowHome,'NEED_SURVEY','YES');
-        setByHeader(ws,H,rowHome,'Clamp_Hook_LATITUDE',h.lat);
-        setByHeader(ws,H,rowHome,'Clamp_Hook_LONGITUDE',h.lon);
-
-        rowHome++;
-      });
-
-      // ===== POLE =====
-      const poleMap={};
-      rows.forEach(r=>{
-        if(String(r.FolderPath||'').toUpperCase().includes('/POLE')){
-          if(!poleMap[r.Name]) poleMap[r.Name]={name:r.Name,coord:getLatLon(r.X,r.Y)};
-        }
-      });
-
-      Object.values(poleMap)
-        .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))
-        .forEach(p=>{
-          let found=new Set();
-          segs.forEach(s=>{
-            const d=Math.hypot(p.coord.lat-s.a.lat,p.coord.lon-s.a.lon);
-            if(d<=0.00002) found.add(s.name);
-          });
-
-          const line=filterOnlyLine([...found].join(','));
-          const k=coordKey(p.coord.lat,p.coord.lon);
-          const net=k&&netByCoord[k]?netByCoord[k]:'-';
-
-          setByHeader(ws,H,rowPole,'Pole ID (New)',p.name);
-          setByHeader(ws,H,rowPole,'Coordinate (Lat) NEW',p.coord.lat);
-          setByHeader(ws,H,rowPole,'Coordinate (Long) NEW',p.coord.lon);
-          setByHeader(ws,H,rowPole,'Pole Provider (New)','LN (Existing)');
-          setByHeader(ws,H,rowPole,'Pole Type','Pole 7/250');
-          setByHeader(ws,H,rowPole,'LINE',line);
-          setByHeader(ws,H,rowPole,'FAT ID/NETWORK ID',net);
-
-          rowPole++;
-        });
-
-      XLSX.writeFile(tplWB,'MASTER_POP_UP_RESULT.xlsx');
-    };
-
-    tplReader.readAsBinaryString(tpl);
+  const A={
+    area:area.value,
+    district:district.value,
+    subdistrict:subdistrict.value,
+    postcode:postcode.value,
+    fdt:fdt.value,
+    idarea:idarea.value
   };
 
-  dbReader.readAsBinaryString(db);
+  const dbWB = XLSX.read(await db.arrayBuffer());
+  const rows = XLSX.utils.sheet_to_json(dbWB.Sheets[dbWB.SheetNames[0]]);
+
+  const tplWB = XLSX.read(await tpl.arrayBuffer());
+  const ws = tplWB.Sheets['MASTER_POP_UP'];
+  if(!ws) return alert('Sheet MASTER_POP_UP tidak ditemukan');
+
+  let r = 1; // ROW 2
+
+  // HOOK MAP
+  const hookMap={};
+  rows.forEach(x=>{
+    if(String(x.FolderPath||'').toUpperCase().includes('/HOOK'))
+      hookMap[normalize(x.Name)] = getLatLon(x.X,x.Y);
+  });
+
+  // HOME
+  rows.forEach(x=>{
+    const fp=String(x.FolderPath||'');
+    if(!fp.includes('/HOME')&&!fp.includes('/HOME-BIZ')) return;
+
+    let raw=String(x.Name||'');
+    let block='-', house=raw;
+    const m=raw.match(/^([A-Za-z])(\d+)$/);
+    if(m){ block=m[1]; house=m[2].padStart(2,'0'); }
+
+    const c=getLatLon(x.X,x.Y);
+    const h=hookMap[normalize(x.CLAIM_HOOK)]||{lat:'',lon:''};
+
+    set(ws,r,1,'-');              // HOMEPASS_ID
+    set(ws,r,2,A.area);
+    set(ws,r,3,'JL.');
+    set(ws,r,4,x.JALAN||'');
+    set(ws,r,5,house);
+    set(ws,r,6,block);
+    set(ws,r,7,'-');
+    set(ws,r,8,'-');
+    set(ws,r,9,'-');
+    set(ws,r,10,A.district);
+    set(ws,r,11,A.subdistrict);
+    set(ws,r,12,A.fdt);
+    set(ws,r,13,x.FAT||'-');
+    set(ws,r,14,c.lat);
+    set(ws,r,15,c.lon);
+    set(ws,r,18,'-');
+    set(ws,r,19,'O');
+    set(ws,r,20,'NEED SURVEY');
+    set(ws,r,24,A.idarea);
+    set(ws,r,25,x.CLAIM_HOOK||'-');
+    set(ws,r,26,'FAT EXT');
+    set(ws,r,27,'YES');
+    set(ws,r,35,h.lat);
+    set(ws,r,36,h.lon);
+
+    r++;
+  });
+
+  XLSX.writeFile(tplWB,'MASTER_POP_UP_RESULT.xlsx');
 }
 </script>
 
