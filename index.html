@@ -15,6 +15,7 @@
 <h2>Master Pop Up Generator (FINAL)</h2>
 
 <input type="file" id="file" accept=".xlsx">
+<input type="file" id="kmz" accept=".kmz,.kml">
 
 <h3>Input Area</h3>
 <input id="area" placeholder="Nama Area">
@@ -29,6 +30,7 @@
 <script>
 // ================= UTIL =================
 const normalize = v => String(v ?? '').trim().toUpperCase();
+const roundKey = (lat, lon) => `${Number(lat).toFixed(6)},${Number(lon).toFixed(6)}`;
 
 function getLatLon(x, y){
   const X = Number(x), Y = Number(y);
@@ -60,13 +62,70 @@ function writeHeader(ws){
   ws['!ref'] = 'A1:AK2000';
 }
 
+// ================= KMZ PARSER =================
+// Ambil LINE dari CABLE DISTRIBUTION (Polyline) → map vertex(lat,lon) => [LINE]
+async function buildKmzLineMap(kmzFile){
+  if (!kmzFile) return {}; // KMZ opsional
+
+  // baca KMZ (zip) atau KML langsung
+  const buf = await kmzFile.arrayBuffer();
+  let kmlText = '';
+
+  // cek apakah KMZ (zip)
+  try{
+    const zip = new JSZip();
+    const z = await zip.loadAsync(buf);
+    const kmlName = Object.keys(z.files).find(n => n.toLowerCase().endsWith('.kml'));
+    if (!kmlName) return {};
+    kmlText = await z.files[kmlName].async('text');
+  }catch(e){
+    // bukan zip → anggap KML
+    kmlText = new TextDecoder().decode(buf);
+  }
+
+  const parser = new DOMParser();
+  const xml = parser.parseFromString(kmlText, 'text/xml');
+
+  const lineMap = {}; // "lat,lon" => Set(LINE)
+  const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
+
+  placemarks.forEach(pm=>{
+    const name = pm.getElementsByTagName('name')[0]?.textContent?.trim();
+    if (!name) return;
+
+    // filter folder CABLE DISTRIBUTION (opsional, aman)
+    const parentText = pm.parentNode?.textContent?.toUpperCase() || '';
+    if (!parentText.includes('CABLE') && !parentText.includes('DISTRIBUTION')) return;
+
+    const lineStrings = pm.getElementsByTagName('LineString');
+    Array.from(lineStrings).forEach(ls=>{
+      const coordsText = ls.getElementsByTagName('coordinates')[0]?.textContent;
+      if (!coordsText) return;
+
+      // format: lon,lat[,alt] dipisah spasi
+      coordsText.trim().split(/\s+/).forEach(pair=>{
+        const [lon, lat] = pair.split(',').map(Number);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        const key = roundKey(lat, lon);
+        if (!lineMap[key]) lineMap[key] = new Set();
+        lineMap[key].add(name);
+      });
+    });
+  });
+
+  // ubah Set → Array
+  Object.keys(lineMap).forEach(k => lineMap[k] = Array.from(lineMap[k]));
+  return lineMap;
+}
+
 // ================= MAIN =================
-function generate(){
-  const file = document.getElementById('file').files[0];
-  if (!file) return alert('Upload DATA BASE.xlsx');
+async function generate(){
+  const dbFile = document.getElementById('file').files[0];
+  const kmzFile = document.getElementById('kmz').files[0];
+  if (!dbFile) return alert('Upload DATA BASE.xlsx');
 
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async e => {
     const wb = XLSX.read(e.target.result, { type:'binary' });
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
@@ -95,7 +154,20 @@ function generate(){
       }
     });
 
-    // ===== HOME / HOME-BIZ (mulai BARIS 2) =====
+    // ===== FAT → LINE (fallback) =====
+    const fatLineMap = {};
+    rows.forEach(r=>{
+      if (String(r.FolderPath || '').toUpperCase().includes('/LINE') && r.FAT){
+        const f = normalize(r.FAT);
+        if (!fatLineMap[f]) fatLineMap[f] = [];
+        if (r.Name) fatLineMap[f].push(r.Name);
+      }
+    });
+
+    // ===== KMZ → LINE (primary) =====
+    const kmzLineMap = await buildKmzLineMap(kmzFile);
+
+    // ===== HOME / HOME-BIZ =====
     rows.forEach(r => {
       const fp = String(r.FolderPath || '');
       if (!fp.includes('/HOME') && !fp.includes('/HOME-BIZ')) return;
@@ -105,51 +177,44 @@ function generate(){
       const homeC = getLatLon(r.X, r.Y);
       const hookC = hookMap[normalize(r.CLAIM_HOOK)] || { lat:'-', lon:'-' };
 
-      // A..AB (HOME)
-      setCell(ws,rowHome,0,'-');                 // A HOMEPASS_ID
-      setCell(ws,rowHome,1,A.area);              // B CLUSTER_NAME
-      setCell(ws,rowHome,2,'JL.');               // C PREFIX_ADDRESS
-      setCell(ws,rowHome,3,r.JALAN||'-');        // D STREET_NAME
-      setCell(ws,rowHome,4,house);               // E HOUSE_NUMBER
-      setCell(ws,rowHome,5,block);               // F BLOCK
-      setCell(ws,rowHome,6,'-');                 // G FLOOR
-      setCell(ws,rowHome,7,'-');                 // H RT
-      setCell(ws,rowHome,8,'-');                 // I RW
-      setCell(ws,rowHome,9,A.district);          // J DISTRICT
-      setCell(ws,rowHome,10,A.subdistrict);      // K SUB_DISTRICT
-      setCell(ws,rowHome,11,A.fdt);              // L FDT_CODE
-      setCell(ws,rowHome,12,r.FAT||'-');         // M FAT_CODE
-      setCell(ws,rowHome,13,homeC.lat);          // N BUILDING_LATITUDE
-      setCell(ws,rowHome,14,homeC.lon);          // O BUILDING_LONGITUDE
-      setCell(ws,rowHome,15,'');                 // P Category BizPass
-      setCell(ws,rowHome,16,A.postcode);         // Q POST CODE
-      setCell(ws,rowHome,17,'-');                // R ADDRESS POLE / FAT
-      setCell(ws,rowHome,18,'O');                // S OV_UG
-      setCell(ws,rowHome,19,'NEED SURVEY');      // T HOUSE_COMMENT_
-      setCell(ws,rowHome,20,'-');                // U BUILDING_NAME
-      setCell(ws,rowHome,21,'-');                // V TOWER
-      setCell(ws,rowHome,22,'-');                // W APTN
-      setCell(ws,rowHome,23,'-');                // X FIBER_NODE__HFC_
-      setCell(ws,rowHome,24,A.idarea);           // Y ID_Area
-      setCell(ws,rowHome,25,r.CLAIM_HOOK||'-');  // Z Clamp_Hook_ID
-      setCell(ws,rowHome,26,'FAT EXT');          // AA DEPLOYMENT_TYPE
-      setCell(ws,rowHome,27,'YES');              // AB NEED_SURVEY
-
-      // AC..AI (POLE) — JANGAN diisi untuk HOME
-      // AJ..AK (Clamp Hook) — KHUSUS HOME
-      setCell(ws,rowHome,35,hookC.lat);          // AJ Clamp_Hook_LATITUDE
-      setCell(ws,rowHome,36,hookC.lon);          // AK Clamp_Hook_LONGITUDE
+      setCell(ws,rowHome,0,'-');
+      setCell(ws,rowHome,1,A.area);
+      setCell(ws,rowHome,2,'JL.');
+      setCell(ws,rowHome,3,r.JALAN||'-');
+      setCell(ws,rowHome,4,house);
+      setCell(ws,rowHome,5,block);
+      setCell(ws,rowHome,6,'-'); setCell(ws,rowHome,7,'-'); setCell(ws,rowHome,8,'-');
+      setCell(ws,rowHome,9,A.district);
+      setCell(ws,rowHome,10,A.subdistrict);
+      setCell(ws,rowHome,11,A.fdt);
+      setCell(ws,rowHome,12,r.FAT||'-');
+      setCell(ws,rowHome,13,homeC.lat);
+      setCell(ws,rowHome,14,homeC.lon);
+      setCell(ws,rowHome,15,'');
+      setCell(ws,rowHome,16,A.postcode);
+      setCell(ws,rowHome,17,'-');
+      setCell(ws,rowHome,18,'O');
+      setCell(ws,rowHome,19,'NEED SURVEY');
+      setCell(ws,rowHome,20,'-'); setCell(ws,rowHome,21,'-'); setCell(ws,rowHome,22,'-');
+      setCell(ws,rowHome,23,'-');
+      setCell(ws,rowHome,24,A.idarea);
+      setCell(ws,rowHome,25,r.CLAIM_HOOK||'-');
+      setCell(ws,rowHome,26,'FAT EXT');
+      setCell(ws,rowHome,27,'YES');
+      // Clamp Hook (AJ–AK) KHUSUS HOME
+      setCell(ws,rowHome,35,hookC.lat);
+      setCell(ws,rowHome,36,hookC.lon);
 
       rowHome++;
     });
 
-    // ===== POLE (AC–AI mulai BARIS 2) =====
+    // ===== POLE =====
     const poleMap = {};
     rows.forEach(r => {
       if (String(r.FolderPath || '').toUpperCase().includes('/POLE')) {
         const k = normalize(r.Name);
         if (!poleMap[k]) {
-          poleMap[k] = { name:r.Name, coord:getLatLon(r.X, r.Y), fat:r.FAT||'-' };
+          poleMap[k] = { name:r.Name, coord:getLatLon(r.X, r.Y), fat:normalize(r.FAT||'') };
         }
       }
     });
@@ -157,15 +222,22 @@ function generate(){
     Object.values(poleMap)
       .sort((a,b)=>a.name.localeCompare(b.name, undefined, { numeric:true }))
       .forEach(p => {
-        // AC..AI — KHUSUS POLE (isi hanya sampai pole terakhir)
-        setCell(ws,rowPole,28,p.name);           // AC Pole ID (New)
-        setCell(ws,rowPole,29,p.coord.lat);      // AD Coordinate (Lat) NEW
-        setCell(ws,rowPole,30,p.coord.lon);      // AE Coordinate (Long) NEW
-        setCell(ws,rowPole,31,'LN (Existing)');  // AF Pole Provider (New)
-        setCell(ws,rowPole,32,'Pole 7/250');     // AG Pole Type
-        setCell(ws,rowPole,33,'');               // AH LINE
-        setCell(ws,rowPole,34,p.fat||'-');       // AI FAT ID/NETWORK ID
-        // AJ..AK — JANGAN diisi untuk POLE
+        // tentukan LINE: KMZ dulu, fallback FAT
+        let lineVal = '-';
+        const key = roundKey(p.coord.lat, p.coord.lon);
+        if (kmzLineMap[key] && kmzLineMap[key].length){
+          lineVal = kmzLineMap[key].join(',');
+        } else if (p.fat && fatLineMap[p.fat]){
+          lineVal = fatLineMap[p.fat].join(',');
+        }
+
+        setCell(ws,rowPole,28,p.name);          // AC Pole ID (New)
+        setCell(ws,rowPole,29,p.coord.lat);     // AD
+        setCell(ws,rowPole,30,p.coord.lon);     // AE
+        setCell(ws,rowPole,31,'LN (Existing)'); // AF
+        setCell(ws,rowPole,32,'Pole 7/250');    // AG
+        setCell(ws,rowPole,33,lineVal);         // AH LINE
+        setCell(ws,rowPole,34,p.fat||'-');      // AI FAT ID/NETWORK ID
 
         rowPole++;
       });
@@ -175,9 +247,12 @@ function generate(){
     XLSX.writeFile(outWB, 'MASTER_POP_UP.xlsx');
   };
 
-  reader.readAsBinaryString(file);
+  reader.readAsBinaryString(dbFile);
 }
 </script>
+
+<!-- JSZip untuk baca KMZ -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 
 </body>
 </html>
