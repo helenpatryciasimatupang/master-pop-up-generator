@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Master Pop Up Generator (FINAL • LINE CLEAN)</title>
+  <title>Master Pop Up Generator (FINAL • FAT/FDT by Same Coordinate)</title>
 
   <!-- XLSX -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
@@ -13,15 +13,17 @@
     body { font-family: Arial, sans-serif; padding: 20px; }
     input { display:block; margin:6px 0; padding:6px; width:360px; }
     button { margin-top:10px; padding:10px 24px; }
+    small { color:#666; }
   </style>
 </head>
 <body>
 
-<h2>Master Pop Up Generator (FINAL • LINE ONLY, EMPTY OK)</h2>
+<h2>Master Pop Up Generator (FINAL)</h2>
 
 <h3>Upload File</h3>
 <input type="file" id="dbFile" accept=".xlsx">
 <input type="file" id="kmzFile" accept=".kmz">
+<small>KMZ untuk LINE (Cable Distribution polyline)</small>
 
 <h3>Input Area</h3>
 <input id="area" placeholder="Nama Area">
@@ -46,10 +48,16 @@ function getLatLon(x,y){
 }
 
 function setCell(ws,r,c,v){
-  ws[XLSX.utils.encode_cell({r,c})] = { t:'s', v: String(v ?? '') };
+  ws[XLSX.utils.encode_cell({r,c})] = { t:'s', v:String(v ?? '') };
 }
 
-// 🔥 FILTER: HANYA "LINE X", KOSONG JIKA TIDAK ADA
+// key koordinat untuk "satu titik"
+function coordKey(lat, lon, decimals=6){
+  if (!isFinite(lat) || !isFinite(lon)) return '';
+  return `${Number(lat).toFixed(decimals)},${Number(lon).toFixed(decimals)}`;
+}
+
+// 🔥 FILTER: hanya "LINE X", kosong jika tidak ada
 function filterOnlyLine(text){
   if(!text) return '';
   const out = text.split(',')
@@ -109,7 +117,7 @@ async function parseKMZSegments(file){
   [...xml.getElementsByTagName("Placemark")].forEach(pm=>{
     const name = pm.getElementsByTagName("name")[0]?.textContent?.trim();
     const coords = pm.getElementsByTagName("coordinates")[0]?.textContent;
-    if(!name||!coords) return;
+    if(!name || !coords) return;
 
     const pts = coords.trim().split(/\s+/).map(c=>{
       const [lon,lat]=c.split(',').map(Number);
@@ -148,7 +156,7 @@ async function generate(){
 
     let rowHome=1, rowPole=1;
 
-    // HOOK MAP
+    // ===== HOOK MAP =====
     const hookMap={};
     rows.forEach(r=>{
       if(String(r.FolderPath||'').toUpperCase().includes('/HOOK')){
@@ -156,21 +164,36 @@ async function generate(){
       }
     });
 
-    // FAT → LINE fallback (akan difilter)
-    const fatLineMap={};
+    // ===== KMZ segments for LINE =====
+    const kmzSegs = kmz ? await parseKMZSegments(kmz) : [];
+    const TOL = 1.5; // meter
+
+    // ===== BUILD MAP: coord -> (FAT/FDT code) =====
+    // ambil dari baris yang FolderPath mengandung /FAT atau /FDT
+    // dan pakai kolom r.Name sebagai ID FAT/FDT (umumnya begitu)
+    const networkByCoord = {};
     rows.forEach(r=>{
-      if(!r.FAT) return;
-      if(String(r.FAT).includes('A')) fatLineMap[r.FAT]='LINE A';
-      if(String(r.FAT).includes('B')) fatLineMap[r.FAT]='LINE B';
-      if(String(r.FAT).includes('C')) fatLineMap[r.FAT]='LINE C';
-      if(String(r.FAT).includes('D')) fatLineMap[r.FAT]='LINE D';
+      const fp = String(r.FolderPath||'').toUpperCase();
+      if (!fp.includes('/FAT') && !fp.includes('/FDT')) return;
+
+      const c = getLatLon(r.X, r.Y);
+      const key = coordKey(c.lat, c.lon, 6);
+      if (!key) return;
+
+      const id = (r.Name ?? '').toString().trim();
+      if (!id) return;
+
+      // kalau ada beberapa item di titik sama, simpan unik
+      if (!networkByCoord[key]) networkByCoord[key] = new Set();
+      networkByCoord[key].add(id);
     });
 
-    // KMZ segments
-    const kmzSegs = kmz ? await parseKMZSegments(kmz) : [];
-    const TOL=1.5; // meter
+    // convert Set -> string (kalau lebih dari 1, gabung pakai koma)
+    Object.keys(networkByCoord).forEach(k=>{
+      networkByCoord[k] = [...networkByCoord[k]].join(',');
+    });
 
-    // ===== HOME =====
+    // ===== HOME (mulai baris 2) =====
     rows.forEach(r=>{
       const fp=String(r.FolderPath||'');
       if(!fp.includes('/HOME')&&!fp.includes('/HOME-BIZ')) return;
@@ -180,22 +203,22 @@ async function generate(){
       const hc=getLatLon(r.X,r.Y);
       const hookC=hookMap[normalize(r.CLAIM_HOOK)]||{lat:'',lon:''};
 
-      setCell(ws,rowHome,0,'');
-      setCell(ws,rowHome,1,A.area);
-      setCell(ws,rowHome,2,'JL.');
-      setCell(ws,rowHome,3,r.JALAN||'');
-      setCell(ws,rowHome,4,house);
-      setCell(ws,rowHome,5,block);
+      setCell(ws,rowHome,0,'');                 // HOMEPASS_ID kosong
+      setCell(ws,rowHome,1,A.area);             // CLUSTER_NAME
+      setCell(ws,rowHome,2,'JL.');              // PREFIX_ADDRESS
+      setCell(ws,rowHome,3,r.JALAN||'');        // STREET_NAME
+      setCell(ws,rowHome,4,house);              // HOUSE_NUMBER
+      setCell(ws,rowHome,5,block);              // BLOCK
       setCell(ws,rowHome,6,''); setCell(ws,rowHome,7,''); setCell(ws,rowHome,8,'');
       setCell(ws,rowHome,9,A.district);
       setCell(ws,rowHome,10,A.subdistrict);
       setCell(ws,rowHome,11,A.fdt);
-      setCell(ws,rowHome,12,r.FAT||'');
+      setCell(ws,rowHome,12,r.FAT||'');         // FAT_CODE (untuk HOME)
       setCell(ws,rowHome,13,hc.lat);
       setCell(ws,rowHome,14,hc.lon);
-      setCell(ws,rowHome,15,'');
+      setCell(ws,rowHome,15,'');                // Category BizPass
       setCell(ws,rowHome,16,A.postcode);
-      setCell(ws,rowHome,17,'');
+      setCell(ws,rowHome,17,'');                // ADDRESS POLE / FAT
       setCell(ws,rowHome,18,'O');
       setCell(ws,rowHome,19,'NEED SURVEY');
       setCell(ws,rowHome,20,''); setCell(ws,rowHome,21,''); setCell(ws,rowHome,22,'');
@@ -204,19 +227,20 @@ async function generate(){
       setCell(ws,rowHome,25,r.CLAIM_HOOK||'');
       setCell(ws,rowHome,26,'FAT EXT');
       setCell(ws,rowHome,27,'YES');
+      // POLE cols AC..AI jangan isi untuk HOME
       setCell(ws,rowHome,35,hookC.lat);
       setCell(ws,rowHome,36,hookC.lon);
 
       rowHome++;
     });
 
-    // ===== POLE =====
+    // ===== POLE LIST unik & urut =====
     const poleMap={};
     rows.forEach(r=>{
       if(String(r.FolderPath||'').toUpperCase().includes('/POLE')){
         const k=normalize(r.Name);
         if(!poleMap[k]){
-          poleMap[k]={name:r.Name,coord:getLatLon(r.X,r.Y),fat:r.FAT||''};
+          poleMap[k]={name:r.Name,coord:getLatLon(r.X,r.Y)};
         }
       }
     });
@@ -224,6 +248,7 @@ async function generate(){
     Object.values(poleMap)
       .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))
       .forEach(p=>{
+        // LINE dari KMZ (segment-based)
         let found=new Set();
         if(isFinite(p.coord.lat)&&isFinite(p.coord.lon)){
           kmzSegs.forEach(s=>{
@@ -232,17 +257,20 @@ async function generate(){
             }
           });
         }
+        const rawLine = found.size ? [...found].join(',') : '';
+        const finalLine = filterOnlyLine(rawLine); // hanya LINE, kosong jika tidak ada
 
-        const raw = found.size ? [...found].join(',') : (fatLineMap[p.fat]||'');
-        const finalLine = filterOnlyLine(raw);
+        // FAT ID/NETWORK ID: hanya kalau ada FAT/FDT yang koordinatnya SAMA dengan POLE
+        const pKey = coordKey(p.coord.lat, p.coord.lon, 6);
+        const networkId = (pKey && networkByCoord[pKey]) ? networkByCoord[pKey] : '';
 
-        setCell(ws,rowPole,28,p.name);
-        setCell(ws,rowPole,29,p.coord.lat);
-        setCell(ws,rowPole,30,p.coord.lon);
-        setCell(ws,rowPole,31,'LN (Existing)');
-        setCell(ws,rowPole,32,'Pole 7/250');
-        setCell(ws,rowPole,33,finalLine); // LINE (kosong jika tidak ada)
-        setCell(ws,rowPole,34,p.fat||'');
+        setCell(ws,rowPole,28,p.name);           // Pole ID (New)
+        setCell(ws,rowPole,29,p.coord.lat);      // Coordinate (Lat) NEW
+        setCell(ws,rowPole,30,p.coord.lon);      // Coordinate (Long) NEW
+        setCell(ws,rowPole,31,'LN (Existing)');  // Pole Provider (New)
+        setCell(ws,rowPole,32,'Pole 7/250');     // Pole Type
+        setCell(ws,rowPole,33,finalLine);        // LINE (kosong kalau tidak ada)
+        setCell(ws,rowPole,34,networkId);        // FAT ID/NETWORK ID (kosong kalau tidak ada yg sama koordinat)
 
         rowPole++;
       });
