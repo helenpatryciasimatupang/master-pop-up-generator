@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Master Pop Up Generator (FINAL SEGMENT-BASED)</title>
+  <title>Master Pop Up Generator (FINAL CLEAN LINE)</title>
 
   <!-- XLSX -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
@@ -13,17 +13,15 @@
     body { font-family: Arial, sans-serif; padding: 20px; }
     input { display:block; margin:6px 0; padding:6px; width:360px; }
     button { margin-top:10px; padding:10px 24px; }
-    small { color:#666; }
   </style>
 </head>
 <body>
 
-<h2>Master Pop Up Generator (FINAL • Segment-Based LINE)</h2>
+<h2>Master Pop Up Generator (FINAL • LINE ONLY)</h2>
 
 <h3>Upload File</h3>
 <input type="file" id="dbFile" accept=".xlsx">
 <input type="file" id="kmzFile" accept=".kmz">
-<small>KMZ harus berisi CABLE DISTRIBUTION (Polyline)</small>
 
 <h3>Input Area</h3>
 <input id="area" placeholder="Nama Area">
@@ -51,6 +49,15 @@ function setCell(ws,r,c,v){
   ws[XLSX.utils.encode_cell({r,c})] = { t:'s', v:String(v ?? '-') };
 }
 
+// 🔥 FILTER HANYA "LINE X"
+function filterOnlyLine(text){
+  if(!text || text==='-') return '-';
+  const out = text.split(',')
+    .map(s=>s.trim().toUpperCase())
+    .filter(s=>/^LINE\s+[A-Z0-9]+$/.test(s));
+  return out.length ? out.join(',') : '-';
+}
+
 // ================= HEADER =================
 const HEADERS = [
   'HOMEPASS_ID','CLUSTER_NAME','PREFIX_ADDRESS','STREET_NAME','HOUSE_NUMBER','BLOCK',
@@ -68,68 +75,51 @@ function writeHeader(ws){
   ws['!ref'] = 'A1:AK5000';
 }
 
-// ================= GEO (SEGMENT DISTANCE) =================
-// Approx meter per degree
+// ================= GEO =================
 const M_PER_DEG_LAT = 111320;
+function metersPerDegLon(lat){ return 111320 * Math.cos(lat * Math.PI / 180); }
 
-function metersPerDegLon(lat){
-  return 111320 * Math.cos(lat * Math.PI / 180);
-}
-
-// distance from point P to segment AB (meters)
-function distPointToSegMeters(p, a, b){
+function distPointToSegMeters(p,a,b){
   const latm = M_PER_DEG_LAT;
   const lonm = metersPerDegLon((a.lat+b.lat)/2 || p.lat);
 
-  const px = p.lon * lonm, py = p.lat * latm;
-  const ax = a.lon * lonm, ay = a.lat * latm;
-  const bx = b.lon * lonm, by = b.lat * latm;
+  const px=p.lon*lonm, py=p.lat*latm;
+  const ax=a.lon*lonm, ay=a.lat*latm;
+  const bx=b.lon*lonm, by=b.lat*latm;
 
-  const vx = bx-ax, vy = by-ay;
-  const wx = px-ax, wy = py-ay;
+  const vx=bx-ax, vy=by-ay;
+  const wx=px-ax, wy=py-ay;
 
-  const c1 = vx*wx + vy*wy;
-  if (c1 <= 0) return Math.hypot(px-ax, py-ay);
-  const c2 = vx*vx + vy*vy;
-  if (c2 <= c1) return Math.hypot(px-bx, py-by);
-
-  const t = c1 / c2;
-  const projx = ax + t*vx, projy = ay + t*vy;
-  return Math.hypot(px-projx, py-projy);
+  const c1=vx*wx+vy*wy;
+  if(c1<=0) return Math.hypot(px-ax,py-ay);
+  const c2=vx*vx+vy*vy;
+  if(c2<=c1) return Math.hypot(px-bx,py-by);
+  const t=c1/c2;
+  return Math.hypot(px-(ax+t*vx),py-(ay+t*vy));
 }
 
-// ================= KMZ PARSER (SEGMENT-BASED) =================
+// ================= KMZ PARSER (SEGMENT) =================
 async function parseKMZSegments(file){
   const zip = await JSZip.loadAsync(file);
   const kml = zip.file(/\.kml$/i)[0];
   const text = await kml.async("text");
   const xml = new DOMParser().parseFromString(text,"text/xml");
 
-  // return array of { name, segments:[[{lat,lon},{lat,lon}], ...] }
-  const lines = [];
-
+  const lines=[];
   [...xml.getElementsByTagName("Placemark")].forEach(pm=>{
     const name = pm.getElementsByTagName("name")[0]?.textContent?.trim();
     const coords = pm.getElementsByTagName("coordinates")[0]?.textContent;
-    if(!name || !coords) return;
+    if(!name||!coords) return;
 
-    const pts = coords.trim().split(/\s+/)
-      .map(c=>{
-        const [lon,lat] = c.split(',').map(Number);
-        if(!isFinite(lat)||!isFinite(lon)) return null;
-        return {lat,lon};
-      })
-      .filter(Boolean);
+    const pts = coords.trim().split(/\s+/).map(c=>{
+      const [lon,lat]=c.split(',').map(Number);
+      return isFinite(lat)&&isFinite(lon)?{lat,lon}:null;
+    }).filter(Boolean);
 
-    const segs = [];
     for(let i=0;i<pts.length-1;i++){
-      segs.push([pts[i], pts[i+1]]);
-    }
-    if(segs.length){
-      lines.push({ name, segments:segs });
+      lines.push({name, a:pts[i], b:pts[i+1]});
     }
   });
-
   return lines;
 }
 
@@ -153,42 +143,42 @@ async function generate(){
     const wb = XLSX.read(e.target.result,{type:'binary'});
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
-    const ws = {};
+    const ws={};
     writeHeader(ws);
 
-    let rowHome = 1;
-    let rowPole = 1;
+    let rowHome=1, rowPole=1;
 
-    // ===== HOOK MAP =====
-    const hookMap = {};
+    // HOOK MAP
+    const hookMap={};
     rows.forEach(r=>{
       if(String(r.FolderPath||'').toUpperCase().includes('/HOOK')){
         hookMap[normalize(r.Name)] = getLatLon(r.X,r.Y);
       }
     });
 
-    // ===== FAT → LINE (fallback sederhana) =====
-    const fatLineMap = {};
+    // FAT → LINE fallback
+    const fatLineMap={};
     rows.forEach(r=>{
       if(!r.FAT) return;
-      if(String(r.FAT).includes('A')) fatLineMap[r.FAT]='LINE A';
-      if(String(r.FAT).includes('B')) fatLineMap[r.FAT]='LINE B';
-      if(String(r.FAT).includes('C')) fatLineMap[r.FAT]='LINE C';
+      if(r.FAT.includes('A')) fatLineMap[r.FAT]='LINE A';
+      if(r.FAT.includes('B')) fatLineMap[r.FAT]='LINE B';
+      if(r.FAT.includes('C')) fatLineMap[r.FAT]='LINE C';
+      if(r.FAT.includes('D')) fatLineMap[r.FAT]='LINE D';
     });
 
-    // ===== KMZ SEGMENTS =====
-    const kmzLines = kmz ? await parseKMZSegments(kmz) : [];
-    const TOL_M = 1.5; // toleransi 1.5 meter
+    // KMZ segments
+    const kmzSegs = kmz ? await parseKMZSegments(kmz) : [];
+    const TOL=1.5;
 
-    // ===== HOME =====
+    // HOME
     rows.forEach(r=>{
-      const fp = String(r.FolderPath||'');
+      const fp=String(r.FolderPath||'');
       if(!fp.includes('/HOME')&&!fp.includes('/HOME-BIZ')) return;
 
-      const house = r.Name||'-';
-      const block = (/^[A-Za-z]\d+/.test(house))?house[0]:'-';
-      const hc = getLatLon(r.X,r.Y);
-      const hookC = hookMap[normalize(r.CLAIM_HOOK)]||{lat:'-',lon:'-'};
+      const house=r.Name||'-';
+      const block=/^[A-Za-z]\d+/.test(house)?house[0]:'-';
+      const hc=getLatLon(r.X,r.Y);
+      const hookC=hookMap[normalize(r.CLAIM_HOOK)]||{lat:'-',lon:'-'};
 
       setCell(ws,rowHome,0,'-');
       setCell(ws,rowHome,1,A.area);
@@ -220,13 +210,13 @@ async function generate(){
       rowHome++;
     });
 
-    // ===== POLE (segment-based LINE) =====
-    const poleMap = {};
+    // POLE
+    const poleMap={};
     rows.forEach(r=>{
       if(String(r.FolderPath||'').toUpperCase().includes('/POLE')){
-        const k = normalize(r.Name);
+        const k=normalize(r.Name);
         if(!poleMap[k]){
-          poleMap[k] = {name:r.Name,coord:getLatLon(r.X,r.Y),fat:r.FAT||'-'};
+          poleMap[k]={name:r.Name,coord:getLatLon(r.X,r.Y),fat:r.FAT||'-'};
         }
       }
     });
@@ -234,26 +224,17 @@ async function generate(){
     Object.values(poleMap)
       .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))
       .forEach(p=>{
-        let linesFound = new Set();
-
-        if(isFinite(p.coord.lat) && isFinite(p.coord.lon)){
-          const P = {lat:p.coord.lat, lon:p.coord.lon};
-          kmzLines.forEach(L=>{
-            for(const [A1,A2] of L.segments){
-              if(distPointToSegMeters(P,A1,A2) <= TOL_M){
-                linesFound.add(L.name);
-                break;
-              }
+        let found=new Set();
+        if(isFinite(p.coord.lat)&&isFinite(p.coord.lon)){
+          kmzSegs.forEach(s=>{
+            if(distPointToSegMeters({lat:p.coord.lat,lon:p.coord.lon},s.a,s.b)<=TOL){
+              found.add(s.name);
             }
           });
         }
 
-        let finalLine = '-';
-        if(linesFound.size){
-          finalLine = [...linesFound].join(',');
-        }else{
-          finalLine = fatLineMap[p.fat] || '-';
-        }
+        let raw = found.size ? [...found].join(',') : (fatLineMap[p.fat]||'-');
+        const finalLine = filterOnlyLine(raw);
 
         setCell(ws,rowPole,28,p.name);
         setCell(ws,rowPole,29,p.coord.lat);
@@ -266,7 +247,7 @@ async function generate(){
         rowPole++;
       });
 
-    const outWB = XLSX.utils.book_new();
+    const outWB=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(outWB,ws,'MASTER_POP_UP');
     XLSX.writeFile(outWB,'MASTER_POP_UP.xlsx');
   };
